@@ -472,6 +472,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         @keyframes flowIn { from { opacity: 0; transform: scale(0.85) translateY(12px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         @keyframes flowOut { from { opacity: 1; transform: scale(1) translateY(0); } to { opacity: 0; transform: scale(0.85) translateY(12px); } }
         .connection-group { transition: opacity 0.3s ease; }
+        .is-hidden { opacity: 0 !important; pointer-events: none !important; }
         .wire-draw path:first-child { stroke-dasharray: var(--wire-len); stroke-dashoffset: var(--wire-len); animation: wireDraw 0.3s ease-out forwards; }
         .wire-undraw path:first-child { stroke-dasharray: var(--wire-len); stroke-dashoffset: 0; animation: wireUndraw 0.2s ease-in forwards; }
         @keyframes wireDraw { to { stroke-dashoffset: 0; } }
@@ -570,11 +571,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 connGroup.classList.remove('wire-draw');
               }, {once: true});
             } else {
+              connGroup.style.opacity = '0';
               connGroup.classList.add('wire-undraw');
               connGroup.addEventListener('animationend', function h() {
                 connGroup.removeEventListener('animationend', h);
-                connGroup.style.opacity = '0';
-                connGroup.classList.remove('wire-undraw');
+                // Do not remove wire-undraw to prevent the path from snapping back to fully drawn during transition
               }, {once: true});
             }
           }
