@@ -2,6 +2,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { useBuilder } from '../BuilderContext';
 import { CustomColorPicker } from './CustomColorPicker';
+import { AlignLeft, AlignCenter, AlignRight, AlignJustify } from 'lucide-react';
 
 const Divider = () => <div style={{ height: '1px', background: '#2d2e3e', margin: '10px 0' }} />;
 
@@ -156,6 +157,52 @@ export const PropertiesPanel: React.FC = () => {
 
   const el = selectedElement as any;
 
+  const renderAlignmentToolbar = (elementToAlign: any) => {
+    return (
+      <>
+        <Label>Text Alignment</Label>
+        <div style={{ display: 'flex', gap: '4px', marginTop: '6px', background: 'rgba(0,0,0,0.2)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+          <button 
+            className="btn"
+            onClick={() => updateElement(elementToAlign.id, { textAlign: 'left' })}
+            onMouseDown={(e) => e.preventDefault()}
+            style={{ flex: 1, padding: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: elementToAlign.textAlign === 'left' ? '#4caf50' : 'transparent', color: elementToAlign.textAlign === 'left' ? '#fff' : 'var(--text-secondary)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            title="Align Left"
+          >
+            <AlignLeft size={16} />
+          </button>
+          <button 
+            className="btn"
+            onClick={() => updateElement(elementToAlign.id, { textAlign: 'center' })}
+            onMouseDown={(e) => e.preventDefault()}
+            style={{ flex: 1, padding: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: (!elementToAlign.textAlign || elementToAlign.textAlign === 'center') ? '#4caf50' : 'transparent', color: (!elementToAlign.textAlign || elementToAlign.textAlign === 'center') ? '#fff' : 'var(--text-secondary)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            title="Align Center"
+          >
+            <AlignCenter size={16} />
+          </button>
+          <button 
+            className="btn"
+            onClick={() => updateElement(elementToAlign.id, { textAlign: 'right' })}
+            onMouseDown={(e) => e.preventDefault()}
+            style={{ flex: 1, padding: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: elementToAlign.textAlign === 'right' ? '#4caf50' : 'transparent', color: elementToAlign.textAlign === 'right' ? '#fff' : 'var(--text-secondary)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            title="Align Right"
+          >
+            <AlignRight size={16} />
+          </button>
+          <button 
+            className="btn"
+            onClick={() => updateElement(elementToAlign.id, { textAlign: 'justify' })}
+            onMouseDown={(e) => e.preventDefault()}
+            style={{ flex: 1, padding: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: elementToAlign.textAlign === 'justify' ? '#4caf50' : 'transparent', color: elementToAlign.textAlign === 'justify' ? '#fff' : 'var(--text-secondary)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            title="Justify"
+          >
+            <AlignJustify size={16} />
+          </button>
+        </div>
+      </>
+    );
+  };
+
   return (
     <div className="properties-panel">
       {selectedIds.length > 1 && (
@@ -230,6 +277,7 @@ export const PropertiesPanel: React.FC = () => {
           <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
           <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 16} onChange={handleChange} /></div>
         </div>
+        {renderAlignmentToolbar(el)}
         <div style={{ marginTop: '12px' }}>
           <CustomColorPicker label="Text" name="color" value={el.color} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
           <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
@@ -248,6 +296,7 @@ export const PropertiesPanel: React.FC = () => {
           <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
           <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 16} onChange={handleChange} /></div>
         </div>
+        {renderAlignmentToolbar(el)}
         <Label>Action</Label>
         <select name="actionType" value={el.actionType} onChange={handleChange}>
           <option value="alert">Alert</option>
@@ -368,6 +417,7 @@ export const PropertiesPanel: React.FC = () => {
           <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
           <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 14} onChange={handleChange} /></div>
         </div>
+        {renderAlignmentToolbar(el)}
 
         <div style={{ marginTop: '12px' }}>
           <CustomColorPicker label="Text" name="color" value={el.color || '#e0e0e0'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />

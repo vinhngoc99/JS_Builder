@@ -348,22 +348,46 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const addElement = (type: ElementType, pos?: { x: number, y: number }, additionalProps?: Partial<CanvasElement>) => {
     saveHistory();
     const id = uuidv4();
-    const x = pos ? pos.x : window.innerWidth / 2 - 100 + (elements.length * 10);
-    const y = pos ? pos.y : window.innerHeight / 2 - 100 + (elements.length * 10);
-    const baseProps = { id, type, x, y, width: 220, height: 250, title: `Node ${elements.length + 1}`, rotation: 0, parentId: null };
+    
+    // Determine target width and height to calculate offset
+    let width = 220;
+    let height = 250;
+    if (additionalProps?.width) width = additionalProps.width;
+    else {
+      switch (type) {
+        case 'node': width = 220; height = 250; break;
+        case 'text': width = 150; height = 60; break;
+        case 'button': width = 120; height = 40; break;
+        case 'image': width = 150; height = 150; break;
+        case 'video': width = 280; height = 157; break;
+        case 'shape': width = 100; height = 100; break;
+      }
+    }
+    if (additionalProps?.height) height = additionalProps.height;
+
+    const viewCenterX = window.innerWidth / 2;
+    const viewCenterY = window.innerHeight / 2;
+
+    const offset = (elements.length * 15) % 150;
+    const canvasCenterX = (viewCenterX - pan.x) / scale;
+    const canvasCenterY = (viewCenterY - pan.y) / scale;
+
+    const x = pos ? pos.x : canvasCenterX - width / 2 + offset;
+    const y = pos ? pos.y : canvasCenterY - height / 2 + offset;
+
+    const baseProps = { id, type, x, y, width, height, title: `Node ${elements.length + 1}`, rotation: 0, parentId: null };
     let newElement: CanvasElement;
     switch (type) {
       case 'node': newElement = { ...baseProps, type: 'node', backgroundColor: 'var(--bg-node)', title: `Node ${elements.length + 1}`, fontFamily: "'Google Sans Text'", ...additionalProps }; break;
-      case 'text': newElement = { ...baseProps, width: 150, height: 60, type: 'text', text: 'Workflow Text', fontSize: 16, color: 'var(--text-primary)', fontFamily: "'Google Sans Text'", borderWidth: 1, borderColor: 'var(--border-color)', borderRadius: 4, backgroundColor: 'transparent', ...additionalProps }; break;
-      case 'button': newElement = { ...baseProps, width: 120, height: 40, type: 'button', text: 'Action', link: '#', backgroundColor: '#4caf50', color: '#ffffff', borderRadius: 6, actionType: 'alert', actionTarget: 'Button clicked!', fontFamily: "'Google Sans Text'", ...additionalProps }; break;
-      case 'image': newElement = { ...baseProps, width: 150, height: 150, type: 'image', src: 'https://images.unsplash.com/photo-1531297172867-4f40136225a4?auto=format&fit=crop&w=300&q=80', alt: 'Placeholder', objectFit: 'cover', borderWidth: 0, borderColor: '#4caf50', borderRadius: 4, ...additionalProps }; break;
-      case 'video': newElement = { ...baseProps, width: 280, height: 157, type: 'video', src: '', borderWidth: 0, borderColor: '#4caf50', borderRadius: 8, ...additionalProps }; break;
-      case 'shape': newElement = { ...baseProps, width: 100, height: 100, type: 'shape', shapeType: 'rectangle', backgroundColor: 'transparent', borderColor: '#4caf50', borderWidth: 2, borderRadius: 8, color: 'var(--text-primary)', ...additionalProps }; break;
+      case 'text': newElement = { ...baseProps, type: 'text', text: 'Workflow Text', fontSize: 16, color: 'var(--text-primary)', fontFamily: "'Google Sans Text'", borderWidth: 1, borderColor: 'var(--border-color)', borderRadius: 4, backgroundColor: 'transparent', ...additionalProps }; break;
+      case 'button': newElement = { ...baseProps, type: 'button', text: 'Action', link: '#', backgroundColor: '#4caf50', color: '#ffffff', borderRadius: 6, actionType: 'alert', actionTarget: 'Button clicked!', fontFamily: "'Google Sans Text'", ...additionalProps }; break;
+      case 'image': newElement = { ...baseProps, type: 'image', src: 'https://images.unsplash.com/photo-1531297172867-4f40136225a4?auto=format&fit=crop&w=300&q=80', alt: 'Placeholder', objectFit: 'cover', borderWidth: 0, borderColor: '#4caf50', borderRadius: 4, ...additionalProps }; break;
+      case 'video': newElement = { ...baseProps, type: 'video', src: '', borderWidth: 0, borderColor: '#4caf50', borderRadius: 8, ...additionalProps }; break;
+      case 'shape': newElement = { ...baseProps, type: 'shape', shapeType: 'rectangle', backgroundColor: 'transparent', borderColor: '#4caf50', borderWidth: 2, borderRadius: 8, color: 'var(--text-primary)', ...additionalProps }; break;
       default: return;
     }
     setElements([...elements, newElement as CanvasElement]); setSelectedIds([id]); setSelectedConnectionId(null);
   };
-
   const updateElement = (id: string, updates: Partial<CanvasElement>) => {
     setElements(prev => prev.map(el => el.id === id ? { ...el, ...updates } as CanvasElement : el));
   };
@@ -696,7 +720,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       switch (el.type) {
         case 'text': {
           const safeText = sanitizeHTML(el.text);
-          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; text-align: center; display: flex; align-items: center; justify-content: center; overflow: hidden; pointer-events: none;">${safeText}</div>`;
+          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; display: flex; align-items: center; justify-content: center; padding: 8px; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word;">${safeText}</div></div>`;
           break;
         }
         case 'button': {
@@ -731,7 +755,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           
           const tag = action === 'link' ? 'a' : 'button';
           const buttonDisabledAttr = (action !== 'link' && el.isDisabled) ? 'disabled' : '';
-          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${getAdaptedTextColor(el.color)}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px;">${safeButtonText}</${tag}>`;
+          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${getAdaptedTextColor(el.color)}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px; padding: 4px; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word;">${safeButtonText}</div></${tag}>`;
           break;
         }
         case 'image': {
@@ -750,7 +774,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
         case 'shape': {
           const hasText = el.text ? true : false;
-          const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: center; padding: 8px; box-sizing: border-box; pointer-events: none; overflow: hidden;">${sanitizeHTML(el.text)}</div>` : '';
+          const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 8px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word;">${sanitizeHTML(el.text)}</div></div>` : '';
           
           if (el.shapeType === 'rectangle') {
             innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; pointer-events: none;">${shapeTextHTML}</div>`;

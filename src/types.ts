@@ -35,6 +35,7 @@ export interface TextElement extends BaseElement {
   borderColor: string;
   borderRadius: number;
   backgroundColor: string;
+  textAlign?: 'left' | 'center' | 'right' | 'justify';
 }
 
 export interface ButtonElement extends BaseElement {
@@ -48,6 +49,7 @@ export interface ButtonElement extends BaseElement {
   actionTarget: string;
   fontFamily: string;
   fontSize?: number;
+  textAlign?: 'left' | 'center' | 'right' | 'justify';
 }
 
 export interface ImageElement extends BaseElement {
@@ -82,6 +84,7 @@ export interface ShapeElement extends BaseElement {
   text?: string;
   color?: string;
   fontFamily?: string;
+  textAlign?: 'left' | 'center' | 'right' | 'justify';
 }
 
 export type CanvasElement = TextElement | ButtonElement | ImageElement | ShapeElement | NodeElement | VideoElement;

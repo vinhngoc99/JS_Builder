@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SketchPicker, ColorResult } from 'react-color';
+import { useBuilder } from '../BuilderContext';
 
 interface CustomColorPickerProps {
   label: string;
@@ -10,9 +11,11 @@ interface CustomColorPickerProps {
 }
 
 export const CustomColorPicker: React.FC<CustomColorPickerProps> = ({ label, name, value, onChange, onTransparent }) => {
+  const { saveHistory } = useBuilder();
   const [isOpen, setIsOpen] = useState(false);
   const [tempColor, setTempColor] = useState(value);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const originalColorRef = useRef(value);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -32,12 +35,24 @@ export const CustomColorPicker: React.FC<CustomColorPickerProps> = ({ label, nam
     setTempColor(value);
   }, [value]);
 
+  const handleOpen = () => {
+    saveHistory();
+    originalColorRef.current = value;
+    setIsOpen(true);
+  };
+
   const handleColorChange = (color: ColorResult) => {
-    setTempColor(color.hex + (Math.round(color.rgb.a! * 255).toString(16).padStart(2, '0')));
+    const hexColor = color.hex + (color.rgb.a !== undefined && color.rgb.a !== 1 ? (Math.round(color.rgb.a * 255).toString(16).padStart(2, '0')) : '');
+    setTempColor(hexColor);
+    onChange({ target: { name, value: hexColor } } as any);
+  };
+
+  const handleCancel = () => {
+    onChange({ target: { name, value: originalColorRef.current } } as any);
+    setIsOpen(false);
   };
 
   const handleApply = () => {
-    onChange({ target: { name, value: tempColor } } as any);
     setIsOpen(false);
   };
 
@@ -49,7 +64,8 @@ export const CustomColorPicker: React.FC<CustomColorPickerProps> = ({ label, nam
       
       <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>
         <div 
-          onClick={() => setIsOpen(true)}
+          onClick={handleOpen}
+          onMouseDown={(e) => e.preventDefault()}
           style={{ 
             width: '24px', height: '24px', borderRadius: '6px', 
             background: isTransparent ? 'repeating-conic-gradient(#3a3c50 0% 25%, transparent 0% 50%) 50% / 8px 8px' : value,
@@ -74,6 +90,7 @@ export const CustomColorPicker: React.FC<CustomColorPickerProps> = ({ label, nam
 
         <button 
           onClick={onTransparent}
+          onMouseDown={(e) => e.preventDefault()}
           title="Set to Transparent"
           style={{ 
             width: '24px', height: '24px', borderRadius: '6px', border: '1px solid #3a3c50', 
@@ -88,11 +105,11 @@ export const CustomColorPicker: React.FC<CustomColorPickerProps> = ({ label, nam
         </button>
 
         {isOpen && (
-          <div ref={popoverRef} style={{ position: 'absolute', top: '100%', right: 0, zIndex: 1000, marginTop: '8px', filter: 'drop-shadow(0 12px 32px rgba(0,0,0,0.8))' }}>
+          <div ref={popoverRef} onMouseDown={(e) => e.preventDefault()} style={{ position: 'absolute', top: '100%', right: 0, zIndex: 1000, marginTop: '8px', filter: 'drop-shadow(0 12px 32px rgba(0,0,0,0.8))' }}>
             <div style={{ background: '#1e1f2e', border: '1px solid #3a3c50', borderRadius: '8px', overflow: 'hidden' }}>
               <SketchPicker color={tempColor} onChange={handleColorChange} disableAlpha={false} presetColors={['#242533', '#4caf50', '#ef5350', '#42a5f5', '#ab47bc', '#e0e0e0', '#1a1b26']} styles={{ default: { picker: { background: '#1e1f2e', border: 'none', boxShadow: 'none' } } }} />
               <div style={{ padding: '10px 14px', background: '#1a1b26', borderTop: '1px solid #2d2e3e', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button onClick={() => setIsOpen(false)} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid #3a3c50', color: '#8c8d9c', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}>Cancel</button>
+                <button onClick={handleCancel} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid #3a3c50', color: '#8c8d9c', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}>Cancel</button>
                 <button onClick={handleApply} style={{ padding: '6px 16px', background: '#4caf50', border: 'none', color: '#fff', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 600, boxShadow: '0 2px 8px rgba(76, 175, 80, 0.4)' }}>OK</button>
               </div>
             </div>

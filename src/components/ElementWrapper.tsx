@@ -23,9 +23,32 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
   const [isRotating, setIsRotating] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
   const editableRef = useRef<HTMLDivElement>(null);
+  const savedRangeRef = useRef<Range | null>(null);
+
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      return sel.getRangeAt(0);
+    }
+    return null;
+  };
+
+  const restoreSelection = (range: Range | null) => {
+    if (range) {
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  };
+
 
   useEffect(() => {
     if (isEditingText && editableRef.current) {
+      const initialText = element.type === 'shape' ? ((element as any).text || '') : (element.text || '');
+      editableRef.current.innerHTML = initialText;
+      
       editableRef.current.focus();
       try {
         const range = document.createRange();
@@ -40,11 +63,83 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
       }
     }
   }, [isEditingText]);
+  // Auto-resize text element height to fit content if content overflows
+  useEffect(() => {
+    if (element.type === 'text' && !isEditingText && wrapperRef.current) {
+      const textContainer = wrapperRef.current.querySelector('.text-element-content') as HTMLElement;
+      if (textContainer) {
+        const scrollH = textContainer.scrollHeight;
+        const borderWidth = (element as any).borderWidth || 0;
+        const neededHeight = scrollH + 18 + (borderWidth * 2);
+        if (neededHeight > element.height) {
+          updateElement(element.id, { height: neededHeight });
+        }
+      }
+    }
+  }, [element.text, element.width, (element as any).fontSize, (element as any).fontFamily, element.type, isEditingText, updateElement, element.height, (element as any).borderWidth]);
 
-  const saveTextEdit = () => {
+  const saveTextEdit = (e?: React.FocusEvent) => {
+    let isTargetSafe = false;
+
+    if (e && e.relatedTarget) {
+      const target = e.relatedTarget as HTMLElement;
+      if (
+        target.closest('.properties-panel') || 
+        target.closest('.rich-text-toolbar') || 
+        target.closest('.toolbar') ||
+        target.closest('.brush-toolbar')
+      ) {
+        isTargetSafe = true;
+      }
+    }
+
+    // Check hover state to catch clicks on non-focusable elements inside safe panels (e.g. background divs, labels)
+    if (!isTargetSafe) {
+      const safeSelectors = ['.properties-panel', '.rich-text-toolbar', '.toolbar', '.brush-toolbar', '.sketch-picker'];
+      for (const selector of safeSelectors) {
+        if (document.querySelector(`${selector}:hover`)) {
+          isTargetSafe = true;
+          break;
+        }
+      }
+    }
+
+    if (isTargetSafe) {
+      // Save content to elements array, but do NOT exit edit mode
+      if (editableRef.current) {
+        const updatedHTML = editableRef.current.innerHTML;
+        let updates: Partial<CanvasElement> = { text: updatedHTML };
+        if (element.type === 'text') {
+          const el = editableRef.current;
+          const originalHeight = el.style.height;
+          el.style.height = 'auto';
+          const contentHeight = el.scrollHeight;
+          el.style.height = originalHeight;
+          const borderWidth = (element as any).borderWidth || 0;
+          updates.height = Math.max(30, contentHeight + 18 + (borderWidth * 2));
+        }
+        updateElement(element.id, updates);
+      }
+      return;
+    }
+
     if (editableRef.current) {
       const updatedHTML = editableRef.current.innerHTML;
-      updateElement(element.id, { text: updatedHTML });
+      let updates: Partial<CanvasElement> = { text: updatedHTML };
+      
+      if (element.type === 'text') {
+        const el = editableRef.current;
+        const originalHeight = el.style.height;
+        el.style.height = 'auto';
+        const contentHeight = el.scrollHeight;
+        el.style.height = originalHeight;
+        
+        const borderWidth = (element as any).borderWidth || 0;
+        const neededHeight = Math.max(30, contentHeight + 18 + (borderWidth * 2));
+        updates.height = neededHeight;
+      }
+      
+      updateElement(element.id, updates);
     }
     setIsEditingText(false);
   };
@@ -85,7 +180,14 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
           <input
             type="color"
             className="rich-text-color-picker-input"
-            onChange={(e) => document.execCommand('foreColor', false, e.target.value)}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              savedRangeRef.current = saveSelection();
+            }}
+            onChange={(e) => {
+              restoreSelection(savedRangeRef.current);
+              document.execCommand('foreColor', false, e.target.value);
+            }}
           />
         </div>
       </div>
@@ -565,7 +667,22 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
       case 'text':
         if (isEditingText) {
           return (
-            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+            <div 
+              style={{ 
+                width: '100%', 
+                height: '100%', 
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.2)',
+                border: '1px solid #4caf50',
+                borderRadius: `${element.borderRadius}px`,
+                boxSizing: 'border-box',
+                padding: '8px',
+                overflowY: 'auto'
+              }}
+            >
               {renderToolbar()}
               <div
                 ref={editableRef}
@@ -585,22 +702,17 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                   color: getAdaptedTextColor(element.color),
                   fontSize: `${element.fontSize}px`,
                   fontFamily: element.fontFamily,
-                  backgroundColor: 'rgba(0,0,0,0.2)',
-                  border: '1px solid #4caf50',
-                  borderRadius: `${element.borderRadius}px`,
                   width: '100%',
-                  height: '100%',
-                  textAlign: 'center',
-                  boxSizing: 'border-box',
+                  textAlign: element.textAlign || 'center',
                   outline: 'none',
-                  padding: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflowY: 'auto',
-                  userSelect: 'text'
+                  userSelect: 'text',
+                  wordBreak: 'break-word'
                 }}
-                dangerouslySetInnerHTML={{ __html: element.text }}
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData('text/plain');
+                  document.execCommand('insertText', false, text);
+                }}
               />
             </div>
           );
@@ -620,17 +732,42 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center', 
-              textAlign: 'center',
               wordBreak: 'break-word',
-              overflow: 'hidden'
+              overflow: 'hidden',
+              padding: '8px',
+              boxSizing: 'border-box'
             }}
-            dangerouslySetInnerHTML={{ __html: element.text }}
-          />
+          >
+            <div 
+              className="text-element-content"
+              style={{
+                width: '100%',
+                textAlign: element.textAlign || 'center',
+                wordBreak: 'break-word'
+              }}
+              dangerouslySetInnerHTML={{ __html: element.text }}
+            />
+          </div>
         );
       case 'button':
         if (isEditingText) {
           return (
-            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+            <div 
+              style={{ 
+                width: '100%', 
+                height: '100%', 
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.2)',
+                border: '1px solid #4caf50',
+                borderRadius: `${element.borderRadius}px`,
+                boxSizing: 'border-box',
+                padding: '4px',
+                overflowY: 'auto'
+              }}
+            >
               {renderToolbar()}
               <div
                 ref={editableRef}
@@ -650,22 +787,18 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                   color: getAdaptedTextColor(element.color),
                   fontSize: `${elAny.fontSize || 16}px`,
                   fontFamily: element.fontFamily,
-                  backgroundColor: 'rgba(0,0,0,0.2)',
-                  border: '1px solid #4caf50',
-                  borderRadius: `${element.borderRadius}px`,
                   width: '100%',
-                  height: '100%',
-                  textAlign: 'center',
-                  boxSizing: 'border-box',
+                  textAlign: element.textAlign || 'center',
                   outline: 'none',
                   fontWeight: 'bold',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflowY: 'auto',
-                  userSelect: 'text'
+                  userSelect: 'text',
+                  wordBreak: 'break-word'
                 }}
-                dangerouslySetInnerHTML={{ __html: element.text }}
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData('text/plain');
+                  document.execCommand('insertText', false, text);
+                }}
               />
             </div>
           );
@@ -742,10 +875,20 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
               border: 'none',
               cursor: isPresenting ? 'pointer' : 'default',
               pointerEvents: 'auto',
-              transition: 'opacity 0.2s, transform 0.1s'
+              transition: 'opacity 0.2s, transform 0.1s',
+              padding: '4px',
+              boxSizing: 'border-box'
             }}
-            dangerouslySetInnerHTML={{ __html: element.text }}
-          />
+          >
+            <div
+              style={{
+                width: '100%',
+                textAlign: element.textAlign || 'center',
+                wordBreak: 'break-word'
+              }}
+              dangerouslySetInnerHTML={{ __html: element.text }}
+            />
+          </button>
         );
       case 'image':
         const objPos = elAny.objectPosition || '50% 50%';
@@ -778,10 +921,28 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
       case 'shape': {
         const shapeText = elAny.text || '';
         let shapeTextOverlay = null;
-
+ 
         if (isEditingText) {
           shapeTextOverlay = (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
+            <div 
+              style={{ 
+                position: 'absolute', 
+                top: 0, 
+                left: 0, 
+                width: '100%', 
+                height: '100%', 
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.3)',
+                border: '1px solid #4caf50',
+                borderRadius: `${element.borderRadius || 0}px`,
+                boxSizing: 'border-box',
+                padding: '8px',
+                overflowY: 'auto'
+              }}
+            >
               {renderToolbar()}
               <div
                 ref={editableRef}
@@ -798,25 +959,20 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                   }
                 }}
                 style={{
-                  width: '100%',
-                  height: '100%',
                   color: getAdaptedTextColor(elAny.color),
                   fontSize: `${elAny.fontSize || 14}px`,
                   fontFamily: elAny.fontFamily || 'sans-serif',
-                  backgroundColor: 'rgba(0,0,0,0.3)',
-                  border: '1px solid #4caf50',
-                  borderRadius: `${element.borderRadius || 0}px`,
-                  textAlign: 'center',
-                  boxSizing: 'border-box',
+                  width: '100%',
+                  textAlign: elAny.textAlign || 'center',
                   outline: 'none',
-                  padding: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflowY: 'auto',
-                  userSelect: 'text'
+                  userSelect: 'text',
+                  wordBreak: 'break-word'
                 }}
-                dangerouslySetInnerHTML={{ __html: shapeText }}
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData('text/plain');
+                  document.execCommand('insertText', false, text);
+                }}
               />
             </div>
           );
@@ -832,17 +988,24 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                 display: 'flex', 
                 alignItems: 'center', 
                 justifyContent: 'center', 
-                color: getAdaptedTextColor(elAny.color), 
-                fontSize: `${elAny.fontSize || 14}px`, 
-                fontFamily: elAny.fontFamily || 'sans-serif', 
                 pointerEvents: 'none', 
                 padding: '8px', 
                 boxSizing: 'border-box', 
-                textAlign: 'center', 
                 overflow: 'hidden' 
               }}
-              dangerouslySetInnerHTML={{ __html: shapeText }}
-            />
+            >
+              <div
+                style={{
+                  width: '100%',
+                  color: getAdaptedTextColor(elAny.color), 
+                  fontSize: `${elAny.fontSize || 14}px`, 
+                  fontFamily: elAny.fontFamily || 'sans-serif', 
+                  textAlign: elAny.textAlign || 'center',
+                  wordBreak: 'break-word'
+                }}
+                dangerouslySetInnerHTML={{ __html: shapeText }}
+              />
+            </div>
           );
         }
 
