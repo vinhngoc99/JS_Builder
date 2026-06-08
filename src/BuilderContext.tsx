@@ -123,6 +123,8 @@ interface BuilderContextType {
   currentSlideIndex: number;
   setCurrentSlideIndex: React.Dispatch<React.SetStateAction<number>>;
   revealDownstream: (startId: string) => void;
+  isHelpOpen: boolean;
+  setIsHelpOpen: (open: boolean) => void;
 }
 
 const BuilderContext = createContext<BuilderContextType | undefined>(undefined);
@@ -183,6 +185,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [editingFocalPointId, setEditingFocalPointId] = useState<string | null>(null);
   const [isPresenting, setIsPresenting] = useState(false);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   
   const [isBrushMode, setIsBrushMode] = useState(false);
   const [brushColor, setBrushColorVal] = useState('#4caf50');
@@ -534,6 +537,48 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const setBrushWidth = (width: number) => setBrushWidthVal(width);
 
   const exportHTML = () => {
+    const sanitizeHTML = (html: string | undefined): string => {
+      if (!html) return '';
+      return html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+        .replace(/on\w+\s*=\s*(['"])(.*?)\1/gi, '');
+    };
+
+    // Collect fonts used by elements
+    const usedFonts = new Set<string>();
+    elements.forEach(el => {
+      const elAny = el as any;
+      if (elAny.fontFamily) {
+        const clean = elAny.fontFamily.replace(/['"]/g, '').trim();
+        if (clean) usedFonts.add(clean);
+      }
+    });
+
+    const systemFonts = new Set(['sans-serif', 'serif', 'monospace', 'arial', 'georgia', 'verdana', 'times new roman', 'courier new', 'trebuchet ms', 'impact', 'comic sans ms']);
+    const googleFontApiMap: Record<string, string> = {
+      'Lexend Deca': 'Lexend+Deca:wght@100..900',
+      'Comic Neue': 'Comic+Neue:ital,wght@0,300;0,400;0,700;1,300;1,400;1,700',
+      'Open Sans': 'Open+Sans:ital,wght@0,300..800;1,300..800',
+      'Roboto': 'Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900',
+    };
+
+    const fontFamiliesToLoad: string[] = [];
+    usedFonts.forEach(font => {
+      if (systemFonts.has(font.toLowerCase())) return;
+      if (font === 'Google Sans Display' || font === 'Google Sans Text' || font === 'Google Sans Flex') return;
+      
+      const apiName = googleFontApiMap[font] || `${font.replace(/\s+/g, '+')}:wght@300;400;500;700`;
+      fontFamiliesToLoad.push(apiName);
+    });
+
+    let fontLinkTags = '';
+    if (fontFamiliesToLoad.length > 0) {
+      const familiesParam = fontFamiliesToLoad.map(f => `family=${f}`).join('&');
+      fontLinkTags = `<link href="https://fonts.googleapis.com/css2?${familiesParam}&display=swap" rel="stylesheet">`;
+    }
+
     const adj = new Map<string, Connection[]>();
     connections.forEach(c => {
       if (!adj.has(c.fromId)) adj.set(c.fromId, []);
@@ -650,12 +695,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       let innerContent = '';
       switch (el.type) {
         case 'text': {
-          const safeText = escapeHtml(el.text);
+          const safeText = sanitizeHTML(el.text);
           innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; text-align: center; display: flex; align-items: center; justify-content: center; overflow: hidden; pointer-events: none;">${safeText}</div>`;
           break;
         }
         case 'button': {
-          const safeButtonText = escapeHtml(el.text);
+          const safeButtonText = sanitizeHTML(el.text);
           let onClickAttr = '';
           const action = el.actionType;
           const target = el.actionTarget;
@@ -705,7 +750,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
         case 'shape': {
           const hasText = el.text ? true : false;
-          const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: center; padding: 8px; box-sizing: border-box; pointer-events: none; overflow: hidden; white-space: pre-wrap; word-break: break-word;">${escapeHtml(el.text)}</div>` : '';
+          const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: center; padding: 8px; box-sizing: border-box; pointer-events: none; overflow: hidden;">${sanitizeHTML(el.text)}</div>` : '';
           
           if (el.shapeType === 'rectangle') {
             innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; pointer-events: none;">${shapeTextHTML}</div>`;
@@ -751,6 +796,18 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     return `
       <style>
+        @font-face {
+          font-family: 'Google Sans Display';
+          src: url('https://fonts.gstatic.com/s/productsans/v5/HYvgU2fE2nRJvZ5JFAumwegdm0LZdjqr5-oayXSOefg.woff2') format('woff2');
+        }
+        @font-face {
+          font-family: 'Google Sans Text';
+          src: url('https://fonts.gstatic.com/s/productsans/v5/HYvgU2fE2nRJvZ5JFAumwegdm0LZdjqr5-oayXSOefg.woff2') format('woff2');
+        }
+        @font-face {
+          font-family: 'Google Sans Flex';
+          src: url('https://fonts.gstatic.com/s/productsans/v5/HYvgU2fE2nRJvZ5JFAumwegdm0LZdjqr5-oayXSOefg.woff2') format('woff2');
+        }
         :root {
           --bg-canvas: #17181f;
           --bg-panel: rgba(22, 23, 33, 0.6);
@@ -836,8 +893,23 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         #interactive-container.space-down { cursor: grab; }
         #interactive-container.panning { cursor: grabbing; }
         #interactive-container.brush-mode { cursor: crosshair !important; }
+        .laser-cursor-none, .laser-cursor-none * {
+          cursor: none !important;
+        }
+        .laser-pointer {
+          width: 14px;
+          height: 14px;
+          background: radial-gradient(circle, #ffffff 20%, #ff1744 60%, rgba(255, 23, 68, 0) 100%);
+          border-radius: 50%;
+          transform: translate(-50%, -50%);
+          box-shadow: 0 0 8px #ff1744, 0 0 16px #ff1744, 0 0 32px #ff1744;
+          position: fixed;
+          pointer-events: none;
+          z-index: 100001;
+          display: none;
+        }
       </style>
-      <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Display:wght@400;500;700&family=Google+Sans+Flex:wght@100..1000&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
+      ${fontLinkTags}
       <button class="theme-toggle-btn" id="present-btn" onclick="startPresentation()" title="Present Slideshow" style="right: 74px; display: flex; align-items: center; justify-content: center;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       </button>
@@ -875,14 +947,18 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <div class="color-picker-btn"><input type="color" id="brush-color" value="#4caf50" style="width:150%;height:150%;margin:-25%;border:none;cursor:pointer;background:none;"></div>
       </div>
       <div id="presentation-bar" style="display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 24px; padding: 8px 24px; align-items: center; gap: 20px; z-index: 10000; box-shadow: 0 12px 32px rgba(0,0,0,0.6); color: var(--text-primary);">
-        <button class="conn-btn" id="prev-slide-btn" onclick="prevSlide()" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">&larr; Prev</button>
+        <button class="conn-btn" id="prev-slide-btn" onclick="prevSlide()" tabindex="-1" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">&larr; Prev</button>
         <span id="slide-num-text" style="font-weight: 600; font-size: 14px; min-width: 80px; text-align: center;">Slide 1 of X</span>
-        <button class="conn-btn" id="next-slide-btn" onclick="nextSlide()" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">Next &rarr;</button>
+        <button class="conn-btn" id="next-slide-btn" onclick="nextSlide()" tabindex="-1" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">Next &rarr;</button>
         <div style="width: 1px; background: var(--border-color); height: 20px;"></div>
-        <button class="conn-btn" onclick="exitPresentation()" style="background: #ef5350; border-radius: 12px; padding: 6px 16px; border: none; font-size: 13px; cursor: pointer; color: #fff; font-weight: 600;">Exit</button>
+        <button class="conn-btn" onclick="exitPresentation()" tabindex="-1" style="background: #ef5350; border-radius: 12px; padding: 6px 16px; border: none; font-size: 13px; cursor: pointer; color: #fff; font-weight: 600;">Exit</button>
       </div>
       <div class="zoom-controls"><span id="zoom-percent" style="font-weight:700; min-width: 50px; text-align: center; font-size: 16px;">100%</span><button class="btn-fit" id="zoom-fit">Fit in view</button></div>
       <div id="notification-toast" class="notification-toast"><div class="notification-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><span id="notification-text"></span></div>
+      
+      <!-- Exported Laser Pointer Elements -->
+      <div id="laser-pointer-el" class="laser-pointer"></div>
+      <svg id="laser-trail-svg" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 100000; overflow: visible; display: none;"></svg>
       <script>
         (function() {
           window.toggleTheme = () => {
@@ -908,6 +984,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           let elements = ${JSON.stringify(elements)};
           const connections = ${JSON.stringify(connections)};
           let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 };
+          let isLaserActive = false, laserPos = { x: -100, y: -100 }, laserTrail = [];
           
           let history = [], redoStack = [];
           function saveHistory() { history.push(JSON.stringify({elements: JSON.parse(JSON.stringify(elements)), brush: brushLayer.innerHTML})); redoStack = []; if(history.length > 50) history.shift(); }
@@ -1038,11 +1115,21 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           };
 
           window.onkeydown = e => {
+            const target = e.target;
+            const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.contentEditable === 'true';
+
+            if (!isInput && e.key.toLowerCase() === 'l') {
+              e.preventDefault();
+              isLaserActive = !isLaserActive;
+              updateLaserState();
+              return;
+            }
+
             if (isPresenting) {
-              if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+              if (e.key === 'ArrowRight' || e.key === ' ' || e.code === 'Space' || e.key === 'Enter') {
                 e.preventDefault();
                 nextSlide();
-              } else if (e.key === 'ArrowLeft') {
+              } else if (e.key === 'ArrowLeft' || ((e.key === ' ' || e.code === 'Space') && e.shiftKey)) {
                 e.preventDefault();
                 prevSlide();
               } else if (e.key === 'Escape') {
@@ -1051,13 +1138,74 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               }
               return;
             }
-            if (e.code === 'Space') { e.preventDefault(); isSpaceDown = true; container.classList.add('space-down'); }
-            if (e.key.toLowerCase() === 'b') toggleBrush();
-            if (e.key.toLowerCase() === 'x') clearBrush();
-            if (e.ctrlKey && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo(); }
-            if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
+            if (e.code === 'Space' && !isInput) { e.preventDefault(); isSpaceDown = true; container.classList.add('space-down'); }
+            if (e.key.toLowerCase() === 'b' && !isInput) toggleBrush();
+            if (e.key.toLowerCase() === 'x' && !isInput) clearBrush();
+            if (e.ctrlKey && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
+            if (e.ctrlKey && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
           };
           window.onkeyup = e => { if (e.code === 'Space') { isSpaceDown = false; isPanning = false; container.classList.remove('space-down', 'panning'); }};
+
+          // Laser pointer and trail logic inside exported HTML
+          const laserEl = document.getElementById('laser-pointer-el');
+          const trailSvg = document.getElementById('laser-trail-svg');
+          let lastMoveTime = Date.now();
+
+          function updateLaserState() {
+            if (isLaserActive) {
+              laserEl.style.display = 'block';
+              trailSvg.style.display = 'block';
+              container.classList.add('laser-cursor-none');
+            } else {
+              laserEl.style.display = 'none';
+              trailSvg.style.display = 'none';
+              container.classList.remove('laser-cursor-none');
+              laserTrail = [];
+              trailSvg.innerHTML = '';
+            }
+          }
+
+          window.addEventListener('pointermove', e => {
+            if (!isLaserActive) return;
+            laserPos = { x: e.clientX, y: e.clientY };
+            laserEl.style.left = laserPos.x + 'px';
+            laserEl.style.top = laserPos.y + 'px';
+            
+            laserTrail.push({ x: e.clientX, y: e.clientY });
+            if (laserTrail.length > 20) {
+              laserTrail.shift();
+            }
+            lastMoveTime = Date.now();
+            renderTrail();
+          });
+
+          function renderTrail() {
+            if (laserTrail.length === 0) {
+              trailSvg.innerHTML = '';
+              return;
+            }
+            let html = '';
+            for (let i = 1; i < laserTrail.length; i++) {
+              const p1 = laserTrail[i - 1];
+              const p2 = laserTrail[i];
+              const ratio = i / laserTrail.length;
+              const opacity = ratio * 0.8;
+              const strokeWidth = ratio * 8 + 2;
+              html += '<line x1="' + p1.x + '" y1="' + p1.y + '" x2="' + p2.x + '" y2="' + p2.y + '" stroke="#ff1744" stroke-width="' + strokeWidth + '" opacity="' + opacity + '" stroke-linecap="round" style="filter: drop-shadow(0 0 4px #ff1744);" />';
+            }
+            trailSvg.innerHTML = html;
+          }
+
+          function decayTrail() {
+            if (isLaserActive && Date.now() - lastMoveTime > 80) {
+              if (laserTrail.length > 0) {
+                laserTrail.shift();
+                renderTrail();
+              }
+            }
+            setTimeout(() => requestAnimationFrame(decayTrail), 16);
+          }
+          requestAnimationFrame(decayTrail);
 
           function animateWire(connGroup, show) {
             const path = connGroup.querySelector('path');
@@ -1320,7 +1468,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       setScale, setPan, exportHTML, alignElements, distributeElements, isPresenting, setIsPresenting, editingFocalPointId, setEditingFocalPointId,
       brushStrokes, isBrushMode, brushColor, brushWidth, setBrushMode, setBrushColor, setBrushWidth, addBrushStroke, clearBrush, undo, redo, saveHistory,
       theme, setTheme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, setIsSnapEnabled: handleSetIsSnapEnabled,
-      currentSlideIndex, setCurrentSlideIndex, revealDownstream
+      currentSlideIndex, setCurrentSlideIndex, revealDownstream,
+      isHelpOpen, setIsHelpOpen
     }}>
       {children}
     </BuilderContext.Provider>

@@ -223,7 +223,9 @@ export const PropertiesPanel: React.FC = () => {
       {/* Type-specific */}
       {el.type === 'text' && (<>
         <Label>Content</Label>
-        <input type="text" name="text" value={el.text} onChange={handleChange} />
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', padding: '6px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', border: '1px dashed var(--border-color)', marginBottom: '8px', textAlign: 'center' }}>
+          Double-click element on canvas to edit text & formatting
+        </div>
         <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
           <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
           <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 16} onChange={handleChange} /></div>
@@ -358,7 +360,9 @@ export const PropertiesPanel: React.FC = () => {
         </select>
 
         <Label>Text Inside Shape</Label>
-        <input type="text" name="text" value={el.text || ''} onChange={handleChange} placeholder="Type inside shape..." />
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', padding: '6px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', border: '1px dashed var(--border-color)', marginBottom: '8px', textAlign: 'center' }}>
+          Double-click shape on canvas to edit text & formatting
+        </div>
 
         <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
           <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>

@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useBuilder } from '../BuilderContext';
 import { ElementWrapper } from './ElementWrapper';
-import { ZoomIn, ZoomOut, Maximize, MousePointer2, Type, Square, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, MousePointer2, Type, Square, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw, X } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 export const Canvas: React.FC = () => {
@@ -12,7 +12,7 @@ export const Canvas: React.FC = () => {
     addElement, removeSelected, duplicateSelected,
     brushStrokes, isBrushMode, brushColor, brushWidth, setBrushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo,
     theme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, isPresenting, setIsPresenting,
-    currentSlideIndex, setCurrentSlideIndex
+    currentSlideIndex, setCurrentSlideIndex, isHelpOpen, setIsHelpOpen
   } = useBuilder();
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -25,6 +25,52 @@ export const Canvas: React.FC = () => {
   
   const [snapGuides, setSnapGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const [draggedGuide, setDraggedGuide] = useState<{ id: string; type: 'horizontal' | 'vertical'; isNew: boolean } | null>(null);
+
+  const [isLaserActive, setIsLaserActive] = useState(false);
+  const [laserPos, setLaserPos] = useState({ x: -100, y: -100 });
+  const [laserTrail, setLaserTrail] = useState<{ x: number; y: number }[]>([]);
+
+  useEffect(() => {
+    if (!isLaserActive) return;
+    const handlePointerMoveLaser = (e: PointerEvent) => {
+      setLaserPos({ x: e.clientX, y: e.clientY });
+      setLaserTrail(prev => {
+        const next = [...prev, { x: e.clientX, y: e.clientY }];
+        if (next.length > 20) {
+          next.shift();
+        }
+        return next;
+      });
+    };
+    window.addEventListener('pointermove', handlePointerMoveLaser);
+    return () => window.removeEventListener('pointermove', handlePointerMoveLaser);
+  }, [isLaserActive]);
+
+  useEffect(() => {
+    if (!isLaserActive) {
+      setLaserTrail([]);
+      return;
+    }
+    
+    let active = true;
+    const decay = () => {
+      if (!active) return;
+      setLaserTrail(prev => {
+        if (prev.length === 0) return prev;
+        return prev.slice(1);
+      });
+      requestAnimationFrame(decay);
+    };
+    
+    const interval = setTimeout(() => {
+      requestAnimationFrame(decay);
+    }, 80);
+    
+    return () => {
+      active = false;
+      clearTimeout(interval);
+    };
+  }, [isPresenting, isLaserActive, laserPos]);
 
   const goToSlide = useCallback((index: number) => {
     const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
@@ -89,14 +135,26 @@ export const Canvas: React.FC = () => {
       const target = e.target as HTMLElement;
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.contentEditable === 'true';
       
+      if (!isInput && (e.key.toLowerCase() === 'h' || e.key === '?')) {
+        e.preventDefault();
+        setIsHelpOpen(!isHelpOpen);
+        return;
+      }
+
+      if (!isInput && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setIsLaserActive(prev => !prev);
+        return;
+      }
+
       if (isPresenting) {
         const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
-        if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+        if (e.key === 'ArrowRight' || e.key === ' ' || e.code === 'Space' || e.key === 'Enter') {
           e.preventDefault();
           if (currentSlideIndex < slides.length - 1) {
             goToSlide(currentSlideIndex + 1);
           }
-        } else if (e.key === 'ArrowLeft' || (e.key === ' ' && e.shiftKey)) {
+        } else if (e.key === 'ArrowLeft' || ((e.key === ' ' || e.code === 'Space') && e.shiftKey)) {
           e.preventDefault();
           if (currentSlideIndex > 0) {
             goToSlide(currentSlideIndex - 1);
@@ -132,7 +190,7 @@ export const Canvas: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting]);
+  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting, isHelpOpen, setIsHelpOpen]);
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -356,7 +414,7 @@ export const Canvas: React.FC = () => {
   };
 
   return (
-    <div className="canvas-container" onContextMenu={handleContextMenu}>
+    <div className={`canvas-container ${(isPresenting && isLaserActive) ? 'laser-cursor-none' : ''}`} onContextMenu={handleContextMenu}>
       {/* Rulers */}
       {!isPresenting && (
         <>
@@ -578,6 +636,7 @@ export const Canvas: React.FC = () => {
               if (currentSlideIndex > 0) setCurrentSlideIndex(currentSlideIndex - 1);
             }} 
             disabled={currentSlideIndex === 0}
+            tabIndex={-1}
             style={{ padding: '6px 12px', opacity: currentSlideIndex === 0 ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
           >
             &larr; Prev
@@ -594,6 +653,7 @@ export const Canvas: React.FC = () => {
               if (currentSlideIndex < slidesCount - 1) setCurrentSlideIndex(currentSlideIndex + 1);
             }} 
             disabled={currentSlideIndex === elements.filter(el => el.type === 'node').length - 1}
+            tabIndex={-1}
             style={{ padding: '6px 12px', opacity: currentSlideIndex === elements.filter(el => el.type === 'node').length - 1 ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
           >
             Next &rarr;
@@ -604,10 +664,109 @@ export const Canvas: React.FC = () => {
           <button 
             className="btn" 
             onClick={() => setIsPresenting(false)} 
+            tabIndex={-1}
             style={{ padding: '6px 16px', background: '#ef5350', color: '#fff', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: 600 }}
           >
             Exit
           </button>
+        </div>
+      )}
+
+      {/* Presentation Laser Pointer and Trail */}
+      {isLaserActive && (
+        <>
+          <svg 
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '100vw',
+              height: '100vh',
+              pointerEvents: 'none',
+              zIndex: 100000,
+              overflow: 'visible'
+            }}
+          >
+            {laserTrail.map((p, i) => {
+              if (i === 0) return null;
+              const prevPoint = laserTrail[i - 1];
+              const ratio = i / laserTrail.length;
+              const opacity = ratio * 0.8;
+              const strokeWidth = ratio * 8 + 2;
+              return (
+                <line
+                  key={`laser-seg-${i}`}
+                  x1={prevPoint.x}
+                  y1={prevPoint.y}
+                  x2={p.x}
+                  y2={p.y}
+                  stroke="#ff1744"
+                  strokeWidth={strokeWidth}
+                  strokeLinecap="round"
+                  opacity={opacity}
+                  style={{
+                    filter: 'drop-shadow(0 0 4px #ff1744)',
+                  }}
+                />
+              );
+            })}
+          </svg>
+          <div 
+            className="laser-pointer"
+            style={{
+              position: 'fixed',
+              left: laserPos.x,
+              top: laserPos.y,
+              pointerEvents: 'none',
+              zIndex: 100001,
+            }}
+          />
+        </>
+      )}
+
+      {/* Keyboard Shortcuts Help Modal */}
+      {isHelpOpen && (
+        <div className="help-modal-overlay" onClick={() => setIsHelpOpen(false)}>
+          <div className="help-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="help-modal-header">
+              <h2>Keyboard Shortcuts</h2>
+              <button className="help-close-btn" onClick={() => setIsHelpOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="help-modal-body">
+              <div className="shortcut-section">
+                <h3>General Editing</h3>
+                <div className="shortcut-grid">
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>V</kbd></span><span className="shortcut-desc">Copy / Paste selected</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>D</kbd></span><span className="shortcut-desc">Duplicate selected</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Delete</kbd> / <kbd>Backspace</kbd></span><span className="shortcut-desc">Delete selected element / connection</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>A</kbd></span><span className="shortcut-desc">Select all elements</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Y</kbd></span><span className="shortcut-desc">Undo / Redo</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Shift</kbd> + Drag</span><span className="shortcut-desc">Lock drag axis (horizontal/vertical)</span></div>
+                </div>
+              </div>
+              <div className="shortcut-section">
+                <h3>Tools & View</h3>
+                <div className="shortcut-grid">
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>B</kbd></span><span className="shortcut-desc">Toggle brush tool</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>X</kbd></span><span className="shortcut-desc">Clear drawings</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Space</kbd> + Drag</span><span className="shortcut-desc">Pan canvas</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Scroll Wheel</kbd></span><span className="shortcut-desc">Zoom in / out</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>H</kbd> / <kbd>?</kbd></span><span className="shortcut-desc">Toggle this Help shortcuts menu</span></div>
+                </div>
+              </div>
+              <div className="shortcut-section">
+                <h3>Presentation Mode</h3>
+                <div className="shortcut-grid">
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Space</kbd> / <kbd>Enter</kbd> / <kbd>&rarr;</kbd></span><span className="shortcut-desc">Next slide</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Shift</kbd> + <kbd>Space</kbd> / <kbd>&larr;</kbd></span><span className="shortcut-desc">Previous slide</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>L</kbd></span><span className="shortcut-desc">Toggle laser pointer cursor</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Escape</kbd></span><span className="shortcut-desc">Exit slideshow</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

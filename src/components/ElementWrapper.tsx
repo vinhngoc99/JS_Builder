@@ -22,6 +22,75 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
   const [isResizing, setIsResizing] = useState<string | null>(null);
   const [isRotating, setIsRotating] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
+  const editableRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isEditingText && editableRef.current) {
+      editableRef.current.focus();
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(editableRef.current);
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  }, [isEditingText]);
+
+  const saveTextEdit = () => {
+    if (editableRef.current) {
+      const updatedHTML = editableRef.current.innerHTML;
+      updateElement(element.id, { text: updatedHTML });
+    }
+    setIsEditingText(false);
+  };
+
+  const renderToolbar = () => {
+    return (
+      <div 
+        className="rich-text-toolbar"
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        <button
+          className="rich-text-btn"
+          onClick={() => document.execCommand('bold', false)}
+          title="Bold"
+          style={{ fontWeight: 'bold' }}
+        >
+          B
+        </button>
+        <button
+          className="rich-text-btn"
+          onClick={() => document.execCommand('italic', false)}
+          title="Italic"
+          style={{ fontStyle: 'italic' }}
+        >
+          I
+        </button>
+        <button
+          className="rich-text-btn"
+          onClick={() => document.execCommand('underline', false)}
+          title="Underline"
+          style={{ textDecoration: 'underline' }}
+        >
+          U
+        </button>
+        <div style={{ width: '1px', height: '16px', background: 'var(--border-color)', margin: '0 4px' }} />
+        <div className="rich-text-color-picker-container" title="Text Color">
+          <span>🎨</span>
+          <input
+            type="color"
+            className="rich-text-color-picker-input"
+            onChange={(e) => document.execCommand('foreColor', false, e.target.value)}
+          />
+        </div>
+      </div>
+    );
+  };
   
   const startPos = useRef({ x: 0, y: 0 });
   const startElement = useRef({ x: 0, y: 0, w: 0, h: 0 });
@@ -33,6 +102,13 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
   const handlePointerDown = (e: React.PointerEvent) => {
     if (isPresenting) return;
     if (isEditingFocalPoint) return;
+    
+    const target = e.target as HTMLElement;
+    if (isEditingText || target.closest('.rich-text-toolbar') || target.closest('[contenteditable="true"]')) {
+      e.stopPropagation();
+      return;
+    }
+    
     e.stopPropagation();
     
     const isMulti = e.shiftKey;
@@ -140,6 +216,14 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
         let snapY: number | null = null;
         let finalDx = dx;
         let finalDy = dy;
+
+        if (e.shiftKey) {
+          if (Math.abs(dx) > Math.abs(dy)) {
+            finalDy = 0;
+          } else {
+            finalDx = 0;
+          }
+        }
 
         if (isSnapEnabled && !e.shiftKey) {
           const rawX = startElement.current.x + dx;
@@ -481,72 +565,114 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
       case 'text':
         if (isEditingText) {
           return (
-            <textarea
-              value={element.text}
-              autoFocus
-              onChange={(e) => updateElement(element.id, { text: e.target.value })}
-              onBlur={() => setIsEditingText(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  setIsEditingText(false);
-                }
-              }}
-              style={{
-                color: getAdaptedTextColor(element.color),
-                fontSize: `${element.fontSize}px`,
-                fontFamily: element.fontFamily,
-                backgroundColor: 'rgba(0,0,0,0.2)',
-                border: '1px solid #4caf50',
-                borderRadius: `${element.borderRadius}px`,
-                width: '100%',
-                height: '100%',
-                textAlign: 'center',
-                resize: 'none',
-                boxSizing: 'border-box',
-                outline: 'none',
-                padding: '8px'
-              }}
-              onFocus={(e) => e.target.select()}
-            />
+            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+              {renderToolbar()}
+              <div
+                ref={editableRef}
+                contentEditable
+                suppressContentEditableWarning
+                onBlur={saveTextEdit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    saveTextEdit();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setIsEditingText(false);
+                  }
+                }}
+                style={{
+                  color: getAdaptedTextColor(element.color),
+                  fontSize: `${element.fontSize}px`,
+                  fontFamily: element.fontFamily,
+                  backgroundColor: 'rgba(0,0,0,0.2)',
+                  border: '1px solid #4caf50',
+                  borderRadius: `${element.borderRadius}px`,
+                  width: '100%',
+                  height: '100%',
+                  textAlign: 'center',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  padding: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflowY: 'auto',
+                  userSelect: 'text'
+                }}
+                dangerouslySetInnerHTML={{ __html: element.text }}
+              />
+            </div>
           );
         }
-        return <div onDoubleClick={() => setIsEditingText(true)} style={{ color: getAdaptedTextColor(element.color), fontSize: element.fontSize, fontFamily: element.fontFamily, backgroundColor: element.backgroundColor, border: `${element.borderWidth}px solid ${getAdaptedBorderColor(element.borderColor)}`, borderRadius: element.borderRadius, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>{element.text}</div>;
+        return (
+          <div 
+            onDoubleClick={() => setIsEditingText(true)} 
+            style={{ 
+              color: getAdaptedTextColor(element.color), 
+              fontSize: element.fontSize, 
+              fontFamily: element.fontFamily, 
+              backgroundColor: element.backgroundColor, 
+              border: `${element.borderWidth}px solid ${getAdaptedBorderColor(element.borderColor)}`, 
+              borderRadius: element.borderRadius, 
+              width: '100%', 
+              height: '100%', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              textAlign: 'center',
+              wordBreak: 'break-word',
+              overflow: 'hidden'
+            }}
+            dangerouslySetInnerHTML={{ __html: element.text }}
+          />
+        );
       case 'button':
         if (isEditingText) {
           return (
-            <input
-              type="text"
-              value={element.text}
-              autoFocus
-              onChange={(e) => updateElement(element.id, { text: e.target.value })}
-              onBlur={() => setIsEditingText(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  setIsEditingText(false);
-                }
-              }}
-              style={{
-                color: getAdaptedTextColor(element.color),
-                fontSize: `${elAny.fontSize || 16}px`,
-                fontFamily: element.fontFamily,
-                backgroundColor: 'rgba(0,0,0,0.2)',
-                border: '1px solid #4caf50',
-                borderRadius: `${element.borderRadius}px`,
-                width: '100%',
-                height: '100%',
-                textAlign: 'center',
-                boxSizing: 'border-box',
-                outline: 'none',
-                fontWeight: 'bold'
-              }}
-              onFocus={(e) => e.target.select()}
-            />
+            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+              {renderToolbar()}
+              <div
+                ref={editableRef}
+                contentEditable
+                suppressContentEditableWarning
+                onBlur={saveTextEdit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    saveTextEdit();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setIsEditingText(false);
+                  }
+                }}
+                style={{
+                  color: getAdaptedTextColor(element.color),
+                  fontSize: `${elAny.fontSize || 16}px`,
+                  fontFamily: element.fontFamily,
+                  backgroundColor: 'rgba(0,0,0,0.2)',
+                  border: '1px solid #4caf50',
+                  borderRadius: `${element.borderRadius}px`,
+                  width: '100%',
+                  height: '100%',
+                  textAlign: 'center',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflowY: 'auto',
+                  userSelect: 'text'
+                }}
+                dangerouslySetInnerHTML={{ __html: element.text }}
+              />
+            </div>
           );
         }
         return (
           <button 
-            onDoubleClick={(e) => {
+            onDoubleClick={() => {
               if (isPresenting) return;
               setIsEditingText(true);
             }}
@@ -618,9 +744,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
               pointerEvents: 'auto',
               transition: 'opacity 0.2s, transform 0.1s'
             }}
-          >
-            {element.text}
-          </button>
+            dangerouslySetInnerHTML={{ __html: element.text }}
+          />
         );
       case 'image':
         const objPos = elAny.objectPosition || '50% 50%';
@@ -656,47 +781,68 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
 
         if (isEditingText) {
           shapeTextOverlay = (
-            <textarea
-              value={shapeText}
-              autoFocus
-              onChange={(e) => updateElement(element.id, { text: e.target.value })}
-              onBlur={() => setIsEditingText(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  setIsEditingText(false);
-                }
-              }}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                color: getAdaptedTextColor(elAny.color),
-                fontSize: `${elAny.fontSize || 14}px`,
-                fontFamily: elAny.fontFamily || 'sans-serif',
-                backgroundColor: 'rgba(0,0,0,0.3)',
-                border: '1px solid #4caf50',
-                borderRadius: `${element.borderRadius || 0}px`,
-                textAlign: 'center',
-                resize: 'none',
-                boxSizing: 'border-box',
-                outline: 'none',
-                padding: '8px',
-                zIndex: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-              onFocus={(e) => e.target.select()}
-            />
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
+              {renderToolbar()}
+              <div
+                ref={editableRef}
+                contentEditable
+                suppressContentEditableWarning
+                onBlur={saveTextEdit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    saveTextEdit();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setIsEditingText(false);
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  color: getAdaptedTextColor(elAny.color),
+                  fontSize: `${elAny.fontSize || 14}px`,
+                  fontFamily: elAny.fontFamily || 'sans-serif',
+                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  border: '1px solid #4caf50',
+                  borderRadius: `${element.borderRadius || 0}px`,
+                  textAlign: 'center',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  padding: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflowY: 'auto',
+                  userSelect: 'text'
+                }}
+                dangerouslySetInnerHTML={{ __html: shapeText }}
+              />
+            </div>
           );
         } else if (shapeText) {
           shapeTextOverlay = (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: getAdaptedTextColor(elAny.color), fontSize: `${elAny.fontSize || 14}px`, fontFamily: elAny.fontFamily || 'sans-serif', pointerEvents: 'none', padding: '8px', boxSizing: 'border-box', textAlign: 'center', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {shapeText}
-            </div>
+            <div 
+              style={{ 
+                position: 'absolute', 
+                top: 0, 
+                left: 0, 
+                width: '100%', 
+                height: '100%', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                color: getAdaptedTextColor(elAny.color), 
+                fontSize: `${elAny.fontSize || 14}px`, 
+                fontFamily: elAny.fontFamily || 'sans-serif', 
+                pointerEvents: 'none', 
+                padding: '8px', 
+                boxSizing: 'border-box', 
+                textAlign: 'center', 
+                overflow: 'hidden' 
+              }}
+              dangerouslySetInnerHTML={{ __html: shapeText }}
+            />
           );
         }
 

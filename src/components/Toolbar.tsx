@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Type, Image as ImageIcon, MousePointerClick, AppWindow, Copy, Video, Sun, Moon, Magnet, Shapes } from 'lucide-react';
+import { Type, Image as ImageIcon, MousePointerClick, AppWindow, Copy, Video, Sun, Moon, Magnet, Shapes, HelpCircle } from 'lucide-react';
 import { useBuilder } from '../BuilderContext';
 
 export const Toolbar: React.FC = () => {
-  const { addElement, selectedIds, duplicateSelected, theme, setTheme, isSnapEnabled, setIsSnapEnabled } = useBuilder();
+  const { addElement, selectedIds, duplicateSelected, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isHelpOpen, setIsHelpOpen } = useBuilder();
   const [isShapeOpen, setIsShapeOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -111,6 +111,14 @@ export const Toolbar: React.FC = () => {
         title={theme === 'light' ? "Switch to Dark Mode" : "Switch to Light Mode"}
       >
         {theme === 'light' ? <Moon size={22} /> : <Sun size={22} />}
+      </div>
+
+      <div 
+        className={`toolbar-item ${isHelpOpen ? 'active' : ''}`}
+        onClick={() => setIsHelpOpen(!isHelpOpen)}
+        title="Keyboard Shortcuts (H)"
+      >
+        <HelpCircle size={22} />
       </div>
 
       <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '8px 0' }} />
