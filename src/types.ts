@@ -44,7 +44,7 @@ export interface ButtonElement extends BaseElement {
   backgroundColor: string;
   color: string;
   borderRadius: number;
-  actionType: 'link' | 'alert' | 'toggleVisibility' | 'toggleDisabled' | 'triggerFlow';
+  actionType: 'link' | 'alert' | 'toggleVisibility' | 'toggleDisabled' | 'triggerFlow' | 'nextSlide' | 'prevSlide' | 'goToSlide';
   actionTarget: string;
   fontFamily: string;
   fontSize?: number;
@@ -73,7 +73,7 @@ export interface VideoElement extends BaseElement {
 
 export interface ShapeElement extends BaseElement {
   type: 'shape';
-  shapeType: 'rectangle' | 'ellipse' | 'triangle' | 'rightTriangle' | 'diamond' | 'pentagon' | 'hexagon' | 'star' | 'parallelogram' | 'trapezoid' | 'arrowRight' | 'arrowLeft' | 'arrowUp' | 'arrowDown';
+  shapeType: 'rectangle' | 'ellipse' | 'triangle' | 'rightTriangle' | 'diamond' | 'pentagon' | 'hexagon' | 'star' | 'parallelogram' | 'trapezoid' | 'arrowRight' | 'arrowLeft' | 'arrowUp' | 'arrowDown' | 'line' | 'arrow' | 'elbow';
   backgroundColor: string;
   borderWidth: number;
   borderColor: string;

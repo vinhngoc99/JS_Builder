@@ -21,8 +21,8 @@ const Toggle = ({ label, checked, onChange, color = '#4caf50' }: { label: string
 
 
 export const PropertiesPanel: React.FC = () => {
-  const { elements, selectedIds, updateElement, removeElement, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled } = useBuilder();
-  
+  const { elements, selectedIds, updateElement, removeElement, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, alignElements, distributeElements, isPresenting, setIsPresenting } = useBuilder();
+
   const lastSelectedId = selectedIds[selectedIds.length - 1];
   const selectedElement = elements.find(el => el.id === lastSelectedId);
 
@@ -43,7 +43,7 @@ export const PropertiesPanel: React.FC = () => {
             <span style={{ color: '#fff', fontSize: '15px', fontWeight: 600 }}>{previewMode ? 'Preview' : 'Export HTML'}</span>
             <div style={{ display: 'flex', gap: '8px' }}>
               {previewMode && <button className="btn primary" onClick={() => setPreviewMode(false)} style={{ height: '32px', padding: '0 14px', fontSize: '12px' }}>Code</button>}
-              <button className="btn" onClick={() => setModalOpen(false)} style={{ height: '32px', padding: '0 14px', fontSize: '12px' }}>Close</button>
+              <button className="btn" onClick={() => setModalOpen(false)} style={{ height: '32px', padding: '0 14px', fontSize: '12px', color: '#fff' }}>Close</button>
             </div>
           </div>
           {previewMode ? (
@@ -92,6 +92,7 @@ export const PropertiesPanel: React.FC = () => {
             <p style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Select an element to view properties</p>
           </div>
         </div>
+        <button onClick={() => setIsPresenting(true)} className="btn" style={{ width: '100%', padding: '10px', background: '#3f51b5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Present Slideshow</button>
         <button onClick={handleGenerate} className="btn primary" style={{ width: '100%', padding: '10px' }}>Export HTML</button>
         {renderExportModal()}
       </div>
@@ -157,7 +158,33 @@ export const PropertiesPanel: React.FC = () => {
 
   return (
     <div className="properties-panel">
-      {selectedIds.length > 1 && <div style={{ padding: '4px 8px', background: '#1a2e1a', borderRadius: '4px', marginBottom: '8px', fontSize: '11px', color: '#4caf50' }}>{selectedIds.length} selected</div>}
+      {selectedIds.length > 1 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+          <div style={{ padding: '6px 10px', background: 'rgba(76, 175, 80, 0.15)', borderRadius: '6px', fontSize: '11px', color: '#4caf50', fontWeight: 600, textAlign: 'center' }}>
+            {selectedIds.length} elements selected
+          </div>
+
+          <div style={{ height: '1px', background: '#2d2e3e', margin: '4px 0' }} />
+
+          <div style={{ fontSize: '11px', color: '#8c8d9c', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Align Selected</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+            <button className="btn" onClick={() => alignElements('left')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Align left edges">Left</button>
+            <button className="btn" onClick={() => alignElements('center')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Align centers horizontally">Center</button>
+            <button className="btn" onClick={() => alignElements('right')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Align right edges">Right</button>
+            <button className="btn" onClick={() => alignElements('top')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Align top edges">Top</button>
+            <button className="btn" onClick={() => alignElements('middle')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Align centers vertically">Middle</button>
+            <button className="btn" onClick={() => alignElements('bottom')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Align bottom edges">Bottom</button>
+          </div>
+
+          <div style={{ fontSize: '11px', color: '#8c8d9c', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginTop: '4px' }}>Distribute Selected</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            <button className="btn" onClick={() => distributeElements('horizontal')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Distribute centers horizontally">Horizontal</button>
+            <button className="btn" onClick={() => distributeElements('vertical')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Distribute centers vertically">Vertical</button>
+          </div>
+
+          <div style={{ height: '1px', background: '#2d2e3e', margin: '4px 0' }} />
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -221,12 +248,58 @@ export const PropertiesPanel: React.FC = () => {
         </div>
         <Label>Action</Label>
         <select name="actionType" value={el.actionType} onChange={handleChange}>
-          <option value="alert">Alert</option><option value="triggerFlow">Trigger Flow</option><option value="toggleDisabled">Disable/Enable</option><option value="link">Link</option>
+          <option value="alert">Alert</option>
+          <option value="link">Link (URL)</option>
+          <option value="toggleDisabled">Toggle Disabled State</option>
+          <option value="toggleVisibility">Toggle Visibility</option>
+          <option value="triggerFlow">Trigger Flow (Reveal Cascade)</option>
+          <option value="nextSlide">Next Slide</option>
+          <option value="prevSlide">Previous Slide</option>
+          <option value="goToSlide">Go to Slide</option>
         </select>
-        {el.actionType === 'link' ? (<><Label>URL</Label><input type="text" name="link" value={el.link} onChange={handleChange} /></>)
-        : (el.actionType === 'triggerFlow' || el.actionType === 'toggleVisibility' || el.actionType === 'toggleDisabled') ? (
-          <><Label>Target</Label><select name="actionTarget" value={el.actionTarget} onChange={handleChange}><option value="">—</option>{elements.filter(x => x.id !== el.id).map(x => <option key={x.id} value={x.id}>{x.type}: {x.title || (x as any).text || x.id.substring(0,6)}</option>)}</select></>
-        ) : (<><Label>Message</Label><input type="text" name="actionTarget" value={el.actionTarget} onChange={handleChange} /></>)}
+        {el.actionType === 'link' ? (
+          <>
+            <Label>URL</Label>
+            <input type="text" name="link" value={el.link} onChange={handleChange} />
+          </>
+        ) : el.actionType === 'goToSlide' ? (
+          <>
+            <Label>Target Slide (Node)</Label>
+            <select name="actionTarget" value={el.actionTarget} onChange={handleChange}>
+              <option value="">—</option>
+              {elements
+                .filter(x => x.type === 'node')
+                .map(x => (
+                  <option key={x.id} value={x.id}>
+                    Slide: {x.title || x.id.substring(0, 6)}
+                  </option>
+                ))}
+            </select>
+          </>
+        ) : (el.actionType === 'triggerFlow' || el.actionType === 'toggleVisibility' || el.actionType === 'toggleDisabled') ? (
+          <>
+            <Label>Target Element</Label>
+            <select name="actionTarget" value={el.actionTarget} onChange={handleChange}>
+              <option value="">—</option>
+              {elements
+                .filter(x => x.id !== el.id)
+                .map(x => (
+                  <option key={x.id} value={x.id}>
+                    {x.type.toUpperCase()}: {x.title || (x as any).text || x.id.substring(0, 6)}
+                  </option>
+                ))}
+            </select>
+          </>
+        ) : (el.actionType === 'nextSlide' || el.actionType === 'prevSlide') ? (
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', fontStyle: 'italic' }}>
+            Navigates slideshow when clicked.
+          </div>
+        ) : (
+          <>
+            <Label>Message</Label>
+            <input type="text" name="actionTarget" value={el.actionTarget} onChange={handleChange} />
+          </>
+        )}
         <div style={{ marginTop: '12px' }}>
           <CustomColorPicker label="Text" name="color" value={el.color || '#ffffff'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
           <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
@@ -267,6 +340,9 @@ export const PropertiesPanel: React.FC = () => {
         <select name="shapeType" value={el.shapeType} onChange={handleChange}>
           <option value="rectangle">Rectangle</option>
           <option value="ellipse">Circle / Ellipse</option>
+          <option value="line">Line</option>
+          <option value="arrow">Arrow</option>
+          <option value="elbow">Elbow Connector</option>
           <option value="triangle">Triangle</option>
           <option value="rightTriangle">Right Triangle</option>
           <option value="diamond">Diamond</option>
@@ -280,7 +356,7 @@ export const PropertiesPanel: React.FC = () => {
           <option value="arrowUp">Arrow Up</option>
           <option value="arrowDown">Arrow Down</option>
         </select>
-        
+
         <Label>Text Inside Shape</Label>
         <input type="text" name="text" value={el.text || ''} onChange={handleChange} placeholder="Type inside shape..." />
 
@@ -296,16 +372,27 @@ export const PropertiesPanel: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-          <div style={{ flex: 1 }}><Label>Border W</Label><input type="number" name="borderWidth" value={el.borderWidth || 0} onChange={handleChange} min={0} /></div>
-          <div style={{ flex: 1 }}><Label>Radius</Label><input type="number" name="borderRadius" value={el.borderRadius || 0} onChange={handleChange} min={0} /></div>
+          <div style={{ flex: 1 }}>
+            <Label>{['line', 'arrow', 'elbow'].includes(el.shapeType) ? 'Line Width' : 'Border W'}</Label>
+            <input type="number" name="borderWidth" value={el.borderWidth || 0} onChange={handleChange} min={0} />
+          </div>
+          {!['line', 'arrow', 'elbow'].includes(el.shapeType) && (
+            <div style={{ flex: 1 }}>
+              <Label>Radius</Label>
+              <input type="number" name="borderRadius" value={el.borderRadius || 0} onChange={handleChange} min={0} />
+            </div>
+          )}
         </div>
       </>)}
 
       {/* Actions */}
-      <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', gap: '6px' }}>
-        <button onClick={() => removeElement(el.id)} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Delete</button>
-        <button onClick={() => { setHtmlCode(exportHTML()); setPreviewMode(true); setModalOpen(true); }} style={{ flex: 1, padding: '8px', background: '#3f51b5', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Preview</button>
-        <button onClick={handleGenerate} style={{ flex: 1, padding: '8px', background: '#4caf50', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Export</button>
+      <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <button onClick={() => setIsPresenting(true)} className="btn" style={{ width: '100%', padding: '8px', background: '#3f51b5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Present Slideshow</button>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button onClick={() => removeElement(el.id)} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Delete</button>
+          <button onClick={() => { setHtmlCode(exportHTML()); setPreviewMode(true); setModalOpen(true); }} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Preview</button>
+          <button onClick={handleGenerate} style={{ flex: 1, padding: '8px', background: '#4caf50', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Export</button>
+        </div>
       </div>
       {renderExportModal()}
     </div>

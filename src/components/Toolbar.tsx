@@ -36,7 +36,10 @@ export const Toolbar: React.FC = () => {
     { type: 'arrowRight', name: 'Arrow Right', svg: <polygon points="4,11 18,11 18,6 26,15 18,24 18,19 4,19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /> },
     { type: 'arrowLeft', name: 'Arrow Left', svg: <polygon points="26,11 12,11 12,6 4,15 12,24 12,19 26,19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /> },
     { type: 'arrowUp', name: 'Arrow Up', svg: <polygon points="11,26 11,12 6,12 15,4 24,12 19,12 19,26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /> },
-    { type: 'arrowDown', name: 'Arrow Down', svg: <polygon points="11,4 11,18 6,18 15,26 24,18 19,18 19,4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /> }
+    { type: 'arrowDown', name: 'Arrow Down', svg: <polygon points="11,4 11,18 6,18 15,26 24,18 19,18 19,4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /> },
+    { type: 'line', name: 'Line', svg: <line x1="5" y1="25" x2="25" y2="5" stroke="currentColor" strokeWidth="2" /> },
+    { type: 'arrow', name: 'Arrow', svg: <g><line x1="5" y1="25" x2="21" y2="9" stroke="currentColor" strokeWidth="2" /><polygon points="25,5 17,7 23,13" fill="currentColor" /></g> },
+    { type: 'elbow', name: 'Elbow Connector', svg: <path d="M 5 25 L 15 25 L 15 5 L 25 5" fill="none" stroke="currentColor" strokeWidth="2" /> }
   ];
 
   const handleSelectShape = (shapeType: string) => {

@@ -10,8 +10,9 @@ export const Canvas: React.FC = () => {
     selectedIds, selectedConnectionId, selectConnection, removeElement, removeConnection, 
     scale, setScale, pan, setPan, editingFocalPointId, setEditingFocalPointId, 
     addElement, removeSelected, duplicateSelected,
-    brushStrokes, isBrushMode, brushColor, brushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo,
-    theme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled
+    brushStrokes, isBrushMode, brushColor, brushWidth, setBrushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo,
+    theme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, isPresenting, setIsPresenting,
+    currentSlideIndex, setCurrentSlideIndex
   } = useBuilder();
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -24,6 +25,37 @@ export const Canvas: React.FC = () => {
   
   const [snapGuides, setSnapGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const [draggedGuide, setDraggedGuide] = useState<{ id: string; type: 'horizontal' | 'vertical'; isNew: boolean } | null>(null);
+
+  const goToSlide = useCallback((index: number) => {
+    const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+    if (slides.length === 0) return;
+    const safeIndex = Math.max(0, Math.min(index, slides.length - 1));
+    setCurrentSlideIndex(safeIndex);
+    
+    const slide = slides[safeIndex];
+    if (!canvasRef.current) return;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    const padding = 60;
+    const availW = rect.width - padding * 2;
+    const availH = rect.height - padding * 2;
+    
+    const scaleX = availW / slide.width;
+    const scaleY = availH / slide.height;
+    const targetScale = Math.min(scaleX, scaleY, 2.0);
+    
+    const targetPanX = rect.width / 2 - (slide.x + slide.width / 2) * targetScale;
+    const targetPanY = rect.height / 2 - (slide.y + slide.height / 2) * targetScale;
+    
+    setScale(targetScale);
+    setPan({ x: targetPanX, y: targetPanY });
+  }, [elements, setScale, setPan]);
+
+  useEffect(() => {
+    if (isPresenting) {
+      goToSlide(currentSlideIndex);
+    }
+  }, [isPresenting, currentSlideIndex, goToSlide]);
 
   // Expose snapGuides via window so ElementWrapper can update them during drag
   useEffect(() => {
@@ -57,6 +89,25 @@ export const Canvas: React.FC = () => {
       const target = e.target as HTMLElement;
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.contentEditable === 'true';
       
+      if (isPresenting) {
+        const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+        if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          if (currentSlideIndex < slides.length - 1) {
+            goToSlide(currentSlideIndex + 1);
+          }
+        } else if (e.key === 'ArrowLeft' || (e.key === ' ' && e.shiftKey)) {
+          e.preventDefault();
+          if (currentSlideIndex > 0) {
+            goToSlide(currentSlideIndex - 1);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setIsPresenting(false);
+        }
+        return;
+      }
+
       if (editingFocalPointId && (e.key === 'Enter' || e.key === 'Escape')) { setEditingFocalPointId(null); return; }
       if (!isInput && e.code === 'Space') { e.preventDefault(); setIsSpaceDown(true); }
       if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput) {
@@ -65,7 +116,7 @@ export const Canvas: React.FC = () => {
       }
       if (e.ctrlKey && e.key === 'd' && !isInput) { e.preventDefault(); duplicateSelected(); }
       if (e.key.toLowerCase() === 'b' && !isInput) { setBrushMode(!isBrushMode); }
-      if (e.shiftKey && e.key.toLowerCase() === 'x' && !isInput) { clearBrush(); }
+      if (e.key.toLowerCase() === 'x' && !isInput) { clearBrush(); }
       
       // Select All, Copy, Paste
       if (e.ctrlKey && e.key === 'a' && !isInput) { e.preventDefault(); selectAll(); }
@@ -81,7 +132,7 @@ export const Canvas: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied]);
+  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting]);
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -104,12 +155,12 @@ export const Canvas: React.FC = () => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = (e.clientX - rect.left - pan.x) / scale, y = (e.clientY - rect.top - pan.y) / scale;
 
-    if (isBrushMode) { setCurrentStroke([{ x, y }]); return; }
     if (isSpaceDown) {
       setIsPanning(true);
       startPanInfo.current = { startX: e.clientX, startY: e.clientY, initialPanX: pan.x, initialPanY: pan.y };
       return;
     }
+    if (isBrushMode) { setCurrentStroke([{ x, y }]); return; }
     if (!e.shiftKey) { selectElement(null); selectConnection(null); }
     setSelectionBox({ x1: x, y1: y, x2: x, y2: y });
   };
@@ -307,17 +358,31 @@ export const Canvas: React.FC = () => {
   return (
     <div className="canvas-container" onContextMenu={handleContextMenu}>
       {/* Rulers */}
-      <div style={{ position: 'absolute', top: 0, left: 0, width: 20, height: 20, background: 'var(--bg-toolbar)', borderBottom: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)', zIndex: 1002 }} />
-      {renderHorizontalRuler()}
-      {renderVerticalRuler()}
+      {!isPresenting && (
+        <>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: 20, height: 20, background: 'var(--bg-toolbar)', borderBottom: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)', zIndex: 1002 }} />
+          {renderHorizontalRuler()}
+          {renderVerticalRuler()}
+        </>
+      )}
 
       <div 
-        className={`canvas ${isSpaceDown ? 'space-down' : ''} ${isPanning ? 'panning' : ''} ${isBrushMode ? 'brush-cursor' : ''}`}
+        className={`canvas ${isSpaceDown ? 'space-down' : ''} ${isPanning ? 'panning' : ''} ${(isBrushMode && !isSpaceDown) ? 'brush-cursor' : ''}`}
         ref={canvasRef}
         onPointerDown={handleCanvasPointerDown}
         style={{ backgroundPosition: `${pan.x}px ${pan.y}px`, backgroundSize: `${currentGridSize}px ${currentGridSize}px` }}
       >
-        <div className="canvas-content" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: '0 0', width: '100%', height: '100%', position: 'absolute' }}>
+        <div 
+          className="canvas-content" 
+          style={{ 
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, 
+            transformOrigin: '0 0', 
+            width: '100%', 
+            height: '100%', 
+            position: 'absolute',
+            transition: isPresenting ? 'transform 0.6s cubic-bezier(0.25, 1, 0.5, 1)' : 'none'
+          }}
+        >
           
           <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute' }}>
             <defs>
@@ -331,7 +396,7 @@ export const Canvas: React.FC = () => {
             {connections.map(conn => {
               const f = elements.find(el => el.id === conn.fromId);
               const t = elements.find(el => el.id === conn.toId);
-              if (!f || !t || f.isHidden || t.isHidden) return null;
+              if (!f || !t) return null;
 
               const fb = getAbsoluteBounds(conn.fromId), tb = getAbsoluteBounds(conn.toId); 
               if (!fb || !tb) return null;
@@ -343,7 +408,12 @@ export const Canvas: React.FC = () => {
               const markerEnd = conn.endArrow === 'arrow' ? (selectedConnectionId === conn.id ? "url(#arrow-selected)" : "url(#arrow)") : "none";
 
               return (
-                <g key={conn.id} className={`connection-group ${selectedConnectionId === conn.id ? 'selected' : ''}`} onPointerDown={(e) => { e.stopPropagation(); selectConnection(conn.id); }}>
+                <g 
+                  key={conn.id} 
+                  className={`connection-group ${selectedConnectionId === conn.id ? 'selected' : ''}`} 
+                  onPointerDown={(e) => { e.stopPropagation(); selectConnection(conn.id); }}
+                  onDoubleClick={(e) => { e.stopPropagation(); removeConnection(conn.id); }}
+                >
                   <path id={`editor-conn-${conn.id}`} d={pathData} className="connection-path" markerStart={markerStart} markerEnd={markerEnd} />
                   <path d={pathData} stroke="transparent" strokeWidth="20" fill="none" />
                   
@@ -430,18 +500,35 @@ export const Canvas: React.FC = () => {
         </div>
       </div>
 
-      <div className="brush-toolbar" style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '10px', background: 'var(--bg-toolbar)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', zIndex: 1000, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
-        <button className={`btn ${isBrushMode ? 'primary' : ''}`} onClick={() => setBrushMode(!isBrushMode)} title="Brush Tool (B)"><Pencil size={18} /></button>
-        <button className="btn" onClick={clearBrush} title="Clear Drawings (Shift+X)"><Eraser size={18} /></button>
-        <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 5px' }} />
-        <button className="btn" onClick={undo} title="Undo (Ctrl+Z)"><RotateCcw size={18} /></button>
-        <button className="btn" onClick={redo} title="Redo (Ctrl+Shift+Z)"><RotateCw size={18} /></button>
-        <div className="color-picker-wrapper">
-          <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} />
+      {!isPresenting && (
+        <div className="brush-toolbar" style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '10px', background: 'var(--bg-toolbar)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', zIndex: 1000, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', alignItems: 'center' }}>
+          <button className={`btn ${isBrushMode ? 'primary' : ''}`} onClick={() => setBrushMode(!isBrushMode)} title="Brush Tool (B)"><Pencil size={18} /></button>
+          <button className="btn" onClick={clearBrush} title="Clear Drawings (X)"><Eraser size={18} /></button>
+          <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 5px' }} />
+          <button className="btn" onClick={undo} title="Undo (Ctrl+Z)"><RotateCcw size={18} /></button>
+          <button className="btn" onClick={redo} title="Redo (Ctrl+Shift+Z)"><RotateCw size={18} /></button>
+          <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 5px' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', userSelect: 'none' }}>Size:</span>
+            <input 
+              type="range" 
+              min="1" 
+              max="20" 
+              value={brushWidth} 
+              onChange={(e) => setBrushWidth(parseInt(e.target.value))} 
+              style={{ width: '60px', cursor: 'pointer', height: '4px', background: 'var(--border-color)', borderRadius: '2px', outline: 'none' }}
+              title={`Brush Size: ${brushWidth}px`}
+            />
+            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', minWidth: '16px', textAlign: 'right', userSelect: 'none' }}>{brushWidth}</span>
+          </div>
+          <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 5px' }} />
+          <div className="color-picker-wrapper">
+            <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} />
+          </div>
         </div>
-      </div>
+      )}
 
-      {contextMenu && (
+      {contextMenu && !isPresenting && (
         <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <div className="context-menu-item" onClick={() => handleAddElementFromMenu('node')}><Layout size={14} /> Add Node</div>
           <div className="context-menu-separator" />
@@ -459,10 +546,70 @@ export const Canvas: React.FC = () => {
         </div>
       )}
 
-      <div className="zoom-controls">
-        <span>{Math.round(scale * 100)}%</span>
-        <button onClick={zoomToFit} className="btn-fit">Fit in view</button>
-      </div>
+      {!isPresenting && (
+        <div className="zoom-controls">
+          <span>{Math.round(scale * 100)}%</span>
+          <button onClick={zoomToFit} className="btn-fit">Fit in view</button>
+        </div>
+      )}
+
+      {isPresenting && (
+        <div 
+          style={{ 
+            position: 'fixed', 
+            bottom: '24px', 
+            left: '50%', 
+            transform: 'translateX(-50%)', 
+            background: 'var(--bg-toolbar)', 
+            border: '1px solid var(--border-color)', 
+            borderRadius: '24px', 
+            padding: '8px 24px', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '20px', 
+            zIndex: 10000, 
+            boxShadow: '0 12px 32px rgba(0,0,0,0.6)', 
+            color: 'var(--text-primary)' 
+          }}
+        >
+          <button 
+            className="btn" 
+            onClick={() => {
+              if (currentSlideIndex > 0) setCurrentSlideIndex(currentSlideIndex - 1);
+            }} 
+            disabled={currentSlideIndex === 0}
+            style={{ padding: '6px 12px', opacity: currentSlideIndex === 0 ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
+          >
+            &larr; Prev
+          </button>
+          
+          <span style={{ fontWeight: 600, fontSize: '14px', minWidth: '80px', textAlign: 'center' }}>
+            Slide {elements.filter(el => el.type === 'node').length > 0 ? currentSlideIndex + 1 : 0} of {elements.filter(el => el.type === 'node').length}
+          </span>
+          
+          <button 
+            className="btn" 
+            onClick={() => {
+              const slidesCount = elements.filter(el => el.type === 'node').length;
+              if (currentSlideIndex < slidesCount - 1) setCurrentSlideIndex(currentSlideIndex + 1);
+            }} 
+            disabled={currentSlideIndex === elements.filter(el => el.type === 'node').length - 1}
+            style={{ padding: '6px 12px', opacity: currentSlideIndex === elements.filter(el => el.type === 'node').length - 1 ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
+          >
+            Next &rarr;
+          </button>
+          
+          <div style={{ width: '1px', background: 'var(--border-color)', height: '20px' }} />
+          
+          <button 
+            className="btn" 
+            onClick={() => setIsPresenting(false)} 
+            style={{ padding: '6px 16px', background: '#ef5350', color: '#fff', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: 600 }}
+          >
+            Exit
+          </button>
+        </div>
+      )}
     </div>
   );
 };

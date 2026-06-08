@@ -106,6 +106,10 @@ interface BuilderContextType {
   setScale: (scale: number) => void;
   setPan: (pan: { x: number; y: number }) => void;
   exportHTML: () => string;
+  alignElements: (alignmentType: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => void;
+  distributeElements: (direction: 'horizontal' | 'vertical') => void;
+  isPresenting: boolean;
+  setIsPresenting: (presenting: boolean) => void;
   editingFocalPointId: string | null;
   setEditingFocalPointId: (id: string | null) => void;
   setBrushMode: (enabled: boolean) => void;
@@ -116,6 +120,9 @@ interface BuilderContextType {
   undo: () => void;
   redo: () => void;
   saveHistory: () => void;
+  currentSlideIndex: number;
+  setCurrentSlideIndex: React.Dispatch<React.SetStateAction<number>>;
+  revealDownstream: (startId: string) => void;
 }
 
 const BuilderContext = createContext<BuilderContextType | undefined>(undefined);
@@ -174,6 +181,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [editingFocalPointId, setEditingFocalPointId] = useState<string | null>(null);
+  const [isPresenting, setIsPresenting] = useState(false);
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   
   const [isBrushMode, setIsBrushMode] = useState(false);
   const [brushColor, setBrushColorVal] = useState('#4caf50');
@@ -195,6 +204,39 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
     setHistory(prev => [...prev.slice(-49), snapshot]);
     setRedoStack([]);
+  }, []);
+
+  const revealDownstream = useCallback((startId: string) => {
+    const visited = new Set<string>();
+    const toUpdate = new Set<string>();
+    
+    const traverse = (id: string) => {
+      if (visited.has(id)) return;
+      visited.add(id);
+      
+      const outgoing = connectionsRef.current.filter(c => c.fromId === id);
+      outgoing.forEach(conn => {
+        const targetId = conn.toId;
+        const targetEl = elementsRef.current.find(e => e.id === targetId);
+        if (targetEl) {
+          toUpdate.add(targetId);
+          if (!targetEl.enableExpandButton) {
+            traverse(targetId);
+          }
+        }
+      });
+    };
+    
+    traverse(startId);
+    
+    if (toUpdate.size > 0) {
+      setElements(prev => prev.map(el => {
+        if (toUpdate.has(el.id)) {
+          return { ...el, isHidden: false };
+        }
+        return el;
+      }));
+    }
   }, []);
 
   const copySelected = useCallback(() => {
@@ -364,6 +406,95 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   };
 
+  const alignElements = useCallback((alignmentType: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
+    if (selectedIds.length <= 1) return;
+    saveHistory();
+
+    const selectedElements = elementsRef.current.filter(el => selectedIds.includes(el.id));
+    if (selectedElements.length === 0) return;
+
+    const lefts = selectedElements.map(el => el.x);
+    const rights = selectedElements.map(el => el.x + el.width);
+    const tops = selectedElements.map(el => el.y);
+    const bottoms = selectedElements.map(el => el.y + el.height);
+
+    const minX = Math.min(...lefts);
+    const maxX = Math.max(...rights);
+    const minY = Math.min(...tops);
+    const maxY = Math.max(...bottoms);
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    setElements(prev => prev.map(el => {
+      if (!selectedIds.includes(el.id)) return el;
+
+      let newX = el.x;
+      let newY = el.y;
+
+      switch (alignmentType) {
+        case 'left':
+          newX = minX;
+          break;
+        case 'center':
+          newX = centerX - el.width / 2;
+          break;
+        case 'right':
+          newX = maxX - el.width;
+          break;
+        case 'top':
+          newY = minY;
+          break;
+        case 'middle':
+          newY = centerY - el.height / 2;
+          break;
+        case 'bottom':
+          newY = maxY - el.height;
+          break;
+      }
+
+      return { ...el, x: newX, y: newY } as CanvasElement;
+    }));
+  }, [selectedIds, saveHistory]);
+
+  const distributeElements = useCallback((direction: 'horizontal' | 'vertical') => {
+    if (selectedIds.length <= 2) return;
+    saveHistory();
+
+    const selectedElements = elementsRef.current.filter(el => selectedIds.includes(el.id));
+    if (selectedElements.length <= 2) return;
+
+    if (direction === 'horizontal') {
+      const sorted = [...selectedElements].sort((a, b) => (a.x + a.width / 2) - (b.x + b.width / 2));
+      const firstCenter = sorted[0].x + sorted[0].width / 2;
+      const lastCenter = sorted[sorted.length - 1].x + sorted[sorted.length - 1].width / 2;
+      const step = (lastCenter - firstCenter) / (sorted.length - 1);
+      
+      setElements(prev => prev.map(el => {
+        const idx = sorted.findIndex(s => s.id === el.id);
+        if (idx === -1) return el;
+        if (idx === 0 || idx === sorted.length - 1) return el;
+        const targetCenter = firstCenter + idx * step;
+        const x = targetCenter - el.width / 2;
+        return { ...el, x } as CanvasElement;
+      }));
+    } else {
+      const sorted = [...selectedElements].sort((a, b) => (a.y + a.height / 2) - (b.y + b.height / 2));
+      const firstCenter = sorted[0].y + sorted[0].height / 2;
+      const lastCenter = sorted[sorted.length - 1].y + sorted[sorted.length - 1].height / 2;
+      const step = (lastCenter - firstCenter) / (sorted.length - 1);
+      
+      setElements(prev => prev.map(el => {
+        const idx = sorted.findIndex(s => s.id === el.id);
+        if (idx === -1) return el;
+        if (idx === 0 || idx === sorted.length - 1) return el;
+        const targetCenter = firstCenter + idx * step;
+        const y = targetCenter - el.height / 2;
+        return { ...el, y } as CanvasElement;
+      }));
+    }
+  }, [selectedIds, saveHistory]);
+
   const selectElement = (id: string | null, isMulti: boolean = false) => {
     if (!id) { setSelectedIds([]); return; }
     if (isMulti) {
@@ -526,18 +657,36 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         case 'button': {
           const safeButtonText = escapeHtml(el.text);
           let onClickAttr = '';
-          if (el.actionType === 'alert') {
-            const safeTarget = escapeHtml(el.actionTarget).replace(/'/g, "\\'");
+          const action = el.actionType;
+          const target = el.actionTarget;
+          
+          if (action === 'alert') {
+            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
             onClickAttr = `onclick="showNotification('${safeTarget}')"`;
-          }
-          else if (el.actionType === 'triggerFlow' || el.actionType === 'toggleVisibility') onClickAttr = ''; // Not supported after Logical Parent removal
-          else if (el.actionType === 'toggleDisabled') onClickAttr = `onclick="toggleDisabled('${el.actionTarget}')"`;
-          else if (el.actionType === 'link') {
+          } else if (action === 'link') {
             const safeLink = escapeHtml(el.link);
             onClickAttr = `href="${safeLink}" target="_blank" rel="noopener noreferrer"`;
+          } else if (action === 'toggleDisabled') {
+            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+            onClickAttr = `onclick="toggleDisabled('${safeTarget}')"`;
+          } else if (action === 'toggleVisibility') {
+            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+            onClickAttr = `onclick="toggleVisibility('${safeTarget}')"`;
+          } else if (action === 'triggerFlow') {
+            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+            onClickAttr = `onclick="triggerFlow('${safeTarget}')"`;
+          } else if (action === 'nextSlide') {
+            onClickAttr = `onclick="nextSlide()"`;
+          } else if (action === 'prevSlide') {
+            onClickAttr = `onclick="prevSlide()"`;
+          } else if (action === 'goToSlide') {
+            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+            onClickAttr = `onclick="goToSlideById('${safeTarget}')"`;
           }
-          const tag = el.actionType === 'link' ? 'a' : 'button';
-          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${getAdaptedTextColor(el.color)}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px;">${safeButtonText}</${tag}>`;
+          
+          const tag = action === 'link' ? 'a' : 'button';
+          const buttonDisabledAttr = (action !== 'link' && el.isDisabled) ? 'disabled' : '';
+          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${getAdaptedTextColor(el.color)}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px;">${safeButtonText}</${tag}>`;
           break;
         }
         case 'image': {
@@ -562,6 +711,15 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; pointer-events: none;">${shapeTextHTML}</div>`;
           } else if (el.shapeType === 'ellipse') {
             innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: 50%; pointer-events: none;">${shapeTextHTML}</div>`;
+          } else if (el.shapeType === 'line') {
+            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none;"><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" /></svg>${shapeTextHTML}</div>`;
+          } else if (el.shapeType === 'arrow') {
+            const markerId = `arrowhead-${el.id}`;
+            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none;"><defs><marker id="${markerId}" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="${getAdaptedBorderColor(el.borderColor)}" /></marker></defs><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" marker-end="url(#${markerId})" /></svg>${shapeTextHTML}</div>`;
+          } else if (el.shapeType === 'elbow') {
+            const halfW = el.width / 2;
+            const d = `M 0 0 L ${halfW} 0 L ${halfW} ${el.height} L ${el.width} ${el.height}`;
+            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none;"><path d="${d}" fill="none" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" /></svg>${shapeTextHTML}</div>`;
           } else {
             const pts = (SHAPE_POLYGONS as any)[el.shapeType] || SHAPE_POLYGONS.triangle;
             innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none;"><polygon points="${pts}" fill="${el.backgroundColor}" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" vector-effect="non-scaling-stroke" /></svg>${shapeTextHTML}</div>`;
@@ -576,7 +734,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     const svgPaths = connections.map(conn => {
       const fromEl = elements.find(el => el.id === conn.fromId);
       const toEl = elements.find(el => el.id === conn.toId);
-      const isHidden = hiddenConnections.has(conn.id);
+      const isHidden = hiddenConnections.has(conn.id) || (fromEl && fromEl.isHidden) || (toEl && toEl.isHidden);
       const safeLabel = conn.label ? escapeHtml(conn.label) : '';
       const labelHTML = safeLabel ? (
         conn.labelAlignment === 'follow'
@@ -624,6 +782,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           --panel-header-bg: #f3f4f6;
         }
         body { margin: 0; padding: 0; overflow: hidden; background: var(--bg-canvas); font-family: 'Google Sans Text', sans-serif; color: var(--text-primary); transition: background 0.3s, color 0.3s; }
+        body.presentation-mode #interactive-content { transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1); }
         .draggable-element { transition: transform 0.05s linear; }
         .notification-toast { position: fixed; top: 24px; right: 24px; background: var(--bg-toolbar); color: var(--text-primary); padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateX(120%); opacity: 0; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
         .notification-toast.show { transform: translateX(0); opacity: 1; }
@@ -679,6 +838,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         #interactive-container.brush-mode { cursor: crosshair !important; }
       </style>
       <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Display:wght@400;500;700&family=Google+Sans+Flex:wght@100..1000&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
+      <button class="theme-toggle-btn" id="present-btn" onclick="startPresentation()" title="Present Slideshow" style="right: 74px; display: flex; align-items: center; justify-content: center;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      </button>
       <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
         <svg class="sun-icon" style="display:none;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
         <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
@@ -699,11 +861,25 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       </div>
       <div class="brush-toolbar">
         <button id="brush-toggle" class="btn-tool" title="Brush (B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
-        <button id="brush-clear" class="btn-tool" title="Clear (Shift+X)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.9-9.9c1-1 2.5-1 3.4 0l4.3 4.3c1 1 1 2.5 0 3.4L10.5 21c-1 1-2.5 1-3.4 0Z"/><path d="m11 6 4 4"/></svg></button>
+        <button id="brush-clear" class="btn-tool" title="Clear (X)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.9-9.9c1-1 2.5-1 3.4 0l4.3 4.3c1 1 1 2.5 0 3.4L10.5 21c-1 1-2.5 1-3.4 0Z"/><path d="m11 6 4 4"/></svg></button>
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <button id="undo-btn" class="btn-tool" title="Undo (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
         <button id="redo-btn" class="btn-tool" title="Redo (Ctrl+Y)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+        <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
+        <div style="display:flex; align-items:center; gap:6px; padding:0 4px;">
+          <span style="font-size:11px; color:var(--text-secondary); user-select:none;">Size:</span>
+          <input type="range" id="brush-width-slider" min="1" max="20" value="4" style="width:60px; cursor:pointer;" title="Brush Width">
+          <span id="brush-width-val" style="font-size:11px; color:var(--text-secondary); min-width:14px; text-align:right;">4</span>
+        </div>
+        <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <div class="color-picker-btn"><input type="color" id="brush-color" value="#4caf50" style="width:150%;height:150%;margin:-25%;border:none;cursor:pointer;background:none;"></div>
+      </div>
+      <div id="presentation-bar" style="display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 24px; padding: 8px 24px; align-items: center; gap: 20px; z-index: 10000; box-shadow: 0 12px 32px rgba(0,0,0,0.6); color: var(--text-primary);">
+        <button class="conn-btn" id="prev-slide-btn" onclick="prevSlide()" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">&larr; Prev</button>
+        <span id="slide-num-text" style="font-weight: 600; font-size: 14px; min-width: 80px; text-align: center;">Slide 1 of X</span>
+        <button class="conn-btn" id="next-slide-btn" onclick="nextSlide()" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">Next &rarr;</button>
+        <div style="width: 1px; background: var(--border-color); height: 20px;"></div>
+        <button class="conn-btn" onclick="exitPresentation()" style="background: #ef5350; border-radius: 12px; padding: 6px 16px; border: none; font-size: 13px; cursor: pointer; color: #fff; font-weight: 600;">Exit</button>
       </div>
       <div class="zoom-controls"><span id="zoom-percent" style="font-weight:700; min-width: 50px; text-align: center; font-size: 16px;">100%</span><button class="btn-fit" id="zoom-fit">Fit in view</button></div>
       <div id="notification-toast" class="notification-toast"><div class="notification-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><span id="notification-text"></span></div>
@@ -764,11 +940,120 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           document.getElementById('brush-clear').onclick = clearBrush;
           document.getElementById('undo-btn').onclick = undo;
           document.getElementById('redo-btn').onclick = redo;
+          
+          const widthSlider = document.getElementById('brush-width-slider');
+          const widthVal = document.getElementById('brush-width-val');
+          if (widthSlider && widthVal) {
+            widthSlider.oninput = () => {
+              widthVal.innerText = widthSlider.value;
+            };
+          }
+
+          let slides = [];
+          let currentSlideIndex = 0;
+          let isPresenting = false;
+
+          window.startPresentation = () => {
+            slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+            if (slides.length === 0) {
+              showNotification('No Node Containers found to present.');
+              return;
+            }
+            isPresenting = true;
+            document.getElementById('presentation-bar').style.display = 'flex';
+            document.getElementById('present-btn').style.display = 'none';
+            document.getElementById('theme-toggle-btn').style.display = 'none';
+            document.querySelector('.brush-toolbar').style.display = 'none';
+            document.querySelector('.zoom-controls').style.display = 'none';
+            
+            document.body.classList.add('presentation-mode');
+            
+            goToSlide(0);
+          };
+
+          window.exitPresentation = () => {
+            isPresenting = false;
+            document.getElementById('presentation-bar').style.display = 'none';
+            document.getElementById('present-btn').style.display = 'flex';
+            document.getElementById('theme-toggle-btn').style.display = 'flex';
+            document.querySelector('.brush-toolbar').style.display = 'flex';
+            document.querySelector('.zoom-controls').style.display = 'flex';
+            
+            document.body.classList.remove('presentation-mode');
+            
+            document.getElementById('zoom-fit').click();
+          };
+
+          window.goToSlide = (index) => {
+            if (slides.length === 0) return;
+            currentSlideIndex = Math.max(0, Math.min(index, slides.length - 1));
+            
+            const slide = slides[currentSlideIndex];
+            const padding = 60;
+            const availW = window.innerWidth - padding * 2;
+            const availH = window.innerHeight - padding * 2;
+            
+            const scaleX = availW / slide.width;
+            const scaleY = availH / slide.height;
+            const targetScale = Math.min(scaleX, scaleY, 2.0);
+            
+            const targetPanX = window.innerWidth / 2 - (slide.x + slide.width / 2) * targetScale;
+            const targetPanY = window.innerHeight / 2 - (slide.y + slide.height / 2) * targetScale;
+            
+            scale = targetScale;
+            pan = { x: targetPanX, y: targetPanY };
+            updateTransform();
+            
+            document.getElementById('prev-slide-btn').disabled = (currentSlideIndex === 0);
+            document.getElementById('prev-slide-btn').style.opacity = (currentSlideIndex === 0) ? '0.4' : '1';
+            
+            document.getElementById('next-slide-btn').disabled = (currentSlideIndex === slides.length - 1);
+            document.getElementById('next-slide-btn').style.opacity = (currentSlideIndex === slides.length - 1) ? '0.4' : '1';
+            
+            document.getElementById('slide-num-text').innerText = 'Slide ' + (currentSlideIndex + 1) + ' of ' + slides.length;
+          };
+
+          window.nextSlide = () => {
+            if (slides.length === 0) {
+              slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+            }
+            if (slides.length === 0) return;
+            if (!isPresenting) {
+              startPresentation();
+              return;
+            }
+            if (currentSlideIndex < slides.length - 1) goToSlide(currentSlideIndex + 1);
+          };
+
+          window.prevSlide = () => {
+            if (slides.length === 0) {
+              slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+            }
+            if (slides.length === 0) return;
+            if (!isPresenting) {
+              startPresentation();
+              return;
+            }
+            if (currentSlideIndex > 0) goToSlide(currentSlideIndex - 1);
+          };
 
           window.onkeydown = e => {
+            if (isPresenting) {
+              if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+                e.preventDefault();
+                nextSlide();
+              } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                prevSlide();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                exitPresentation();
+              }
+              return;
+            }
             if (e.code === 'Space') { e.preventDefault(); isSpaceDown = true; container.classList.add('space-down'); }
             if (e.key.toLowerCase() === 'b') toggleBrush();
-            if (e.shiftKey && e.key.toLowerCase() === 'x') clearBrush();
+            if (e.key.toLowerCase() === 'x') clearBrush();
             if (e.ctrlKey && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo(); }
             if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
           };
@@ -883,7 +1168,34 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             const disabled = el.classList.toggle('disabled');
             el.style.filter = disabled ? 'grayscale(1) contrast(0.5)' : 'none';
             el.style.opacity = disabled ? '0.6' : '1';
-            if (!el.classList.contains('is-button')) el.style.pointerEvents = disabled ? 'none' : 'auto';
+            if (!el.classList.contains('is-button')) {
+              el.style.pointerEvents = disabled ? 'none' : 'auto';
+            } else {
+              const innerBtn = el.querySelector('button');
+              if (innerBtn) innerBtn.disabled = disabled;
+            }
+          };
+
+          window.toggleVisibility = function(id) {
+            const el = document.getElementById('el-wrapper-' + id); if (!el) return;
+            el.classList.toggle('is-hidden');
+          };
+
+          window.triggerFlow = function(id) {
+            revealCascade(id);
+          };
+
+          window.goToSlideById = function(id) {
+            if (slides.length === 0) {
+              slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+            }
+            const index = slides.findIndex(s => s.id === id);
+            if (index !== -1) {
+              if (!isPresenting) {
+                startPresentation();
+              }
+              goToSlide(index);
+            }
           };
 
           function updateTransform() {
@@ -911,7 +1223,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               currentStroke = document.createElementNS('http://www.w3.org/2000/svg', 'path');
               currentStroke.setAttribute('fill', 'none');
               currentStroke.setAttribute('stroke', document.getElementById('brush-color').value);
-              currentStroke.setAttribute('stroke-width', '4');
+              const brushWidthVal = document.getElementById('brush-width-slider') ? document.getElementById('brush-width-slider').value : '4';
+              currentStroke.setAttribute('stroke-width', brushWidthVal);
               currentStroke.setAttribute('stroke-linecap', 'round');
               currentStroke.setAttribute('stroke-linejoin', 'round');
               currentStroke.dataset.pts = x + ',' + y;
@@ -1004,9 +1317,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       elements, connections, selectedIds, selectedConnectionId, connectingNode, scale, pan, 
       addElement, updateElement, updateConnection, removeElement, removeSelected, selectElement, selectConnection, 
       setConnectingNode, addConnection, removeConnection, duplicateSelected, 
-      setScale, setPan, exportHTML, editingFocalPointId, setEditingFocalPointId,
+      setScale, setPan, exportHTML, alignElements, distributeElements, isPresenting, setIsPresenting, editingFocalPointId, setEditingFocalPointId,
       brushStrokes, isBrushMode, brushColor, brushWidth, setBrushMode, setBrushColor, setBrushWidth, addBrushStroke, clearBrush, undo, redo, saveHistory,
-      theme, setTheme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, setIsSnapEnabled: handleSetIsSnapEnabled
+      theme, setTheme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, setIsSnapEnabled: handleSetIsSnapEnabled,
+      currentSlideIndex, setCurrentSlideIndex, revealDownstream
     }}>
       {children}
     </BuilderContext.Provider>

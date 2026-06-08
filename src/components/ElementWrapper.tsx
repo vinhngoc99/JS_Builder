@@ -8,7 +8,11 @@ interface ElementWrapperProps {
 }
 
 export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
-  const { elements, selectedIds, selectElement, updateElement, setConnectingNode, connectingNode, addConnection, scale, editingFocalPointId, setEditingFocalPointId, saveHistory, isSnapEnabled, guides } = useBuilder();
+  const { 
+    elements, selectedIds, selectElement, updateElement, setConnectingNode, connectingNode, 
+    addConnection, scale, editingFocalPointId, setEditingFocalPointId, saveHistory, isSnapEnabled, guides,
+    isPresenting, currentSlideIndex, setCurrentSlideIndex, revealDownstream
+  } = useBuilder();
   const isSelected = selectedIds.includes(element.id);
   const isEditingFocalPoint = editingFocalPointId === element.id;
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -27,6 +31,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
   const startRotations = useRef<{ id: string, rotation: number }[]>([]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (isPresenting) return;
     if (isEditingFocalPoint) return;
     e.stopPropagation();
     
@@ -539,7 +544,84 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
             />
           );
         }
-        return <div onDoubleClick={() => setIsEditingText(true)} style={{ backgroundColor: element.backgroundColor, color: getAdaptedTextColor(element.color), fontFamily: element.fontFamily, fontSize: `${elAny.fontSize || 16}px`, borderRadius: element.borderRadius, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{element.text}</div>;
+        return (
+          <button 
+            onDoubleClick={(e) => {
+              if (isPresenting) return;
+              setIsEditingText(true);
+            }}
+            onClick={(e) => {
+              if (!isPresenting) return;
+              e.stopPropagation();
+              
+              const action = element.actionType;
+              const target = element.actionTarget;
+              
+              if (action === 'alert') {
+                alert(target || 'Button clicked!');
+              } else if (action === 'link') {
+                if (element.link) {
+                  window.open(element.link, '_blank', 'noopener,noreferrer');
+                }
+              } else if (action === 'toggleDisabled') {
+                if (target) {
+                  const targetEl = elements.find(el => el.id === target);
+                  if (targetEl) {
+                    updateElement(target, { isDisabled: !targetEl.isDisabled });
+                  }
+                }
+              } else if (action === 'toggleVisibility') {
+                if (target) {
+                  const targetEl = elements.find(el => el.id === target);
+                  if (targetEl) {
+                    updateElement(target, { isHidden: !targetEl.isHidden });
+                  }
+                }
+              } else if (action === 'triggerFlow') {
+                if (target) {
+                  revealDownstream(target);
+                }
+              } else if (action === 'nextSlide') {
+                const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+                if (currentSlideIndex < slides.length - 1) {
+                  setCurrentSlideIndex(currentSlideIndex + 1);
+                }
+              } else if (action === 'prevSlide') {
+                if (currentSlideIndex > 0) {
+                  setCurrentSlideIndex(currentSlideIndex - 1);
+                }
+              } else if (action === 'goToSlide') {
+                if (target) {
+                  const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+                  const targetIdx = slides.findIndex(s => s.id === target);
+                  if (targetIdx !== -1) {
+                    setCurrentSlideIndex(targetIdx);
+                  }
+                }
+              }
+            }}
+            disabled={element.isDisabled}
+            style={{ 
+              backgroundColor: element.backgroundColor, 
+              color: getAdaptedTextColor(element.color), 
+              fontFamily: element.fontFamily, 
+              fontSize: `${elAny.fontSize || 16}px`, 
+              borderRadius: `${element.borderRadius}px`, 
+              width: '100%', 
+              height: '100%', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              fontWeight: 'bold',
+              border: 'none',
+              cursor: isPresenting ? 'pointer' : 'default',
+              pointerEvents: 'auto',
+              transition: 'opacity 0.2s, transform 0.1s'
+            }}
+          >
+            {element.text}
+          </button>
+        );
       case 'image':
         const objPos = elAny.objectPosition || '50% 50%';
         return (
@@ -614,6 +696,70 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
           shapeTextOverlay = (
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: getAdaptedTextColor(elAny.color), fontSize: `${elAny.fontSize || 14}px`, fontFamily: elAny.fontFamily || 'sans-serif', pointerEvents: 'none', padding: '8px', boxSizing: 'border-box', textAlign: 'center', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {shapeText}
+            </div>
+          );
+        }
+
+        if (element.shapeType === 'line') {
+          return (
+            <div 
+              style={{ position: 'relative', width: '100%', height: '100%' }}
+              onDoubleClick={() => setIsEditingText(true)}
+            >
+              <svg width="100%" height="100%" style={{ overflow: 'visible' }}>
+                <line x1="0" y1="0" x2={element.width} y2={element.height} stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} />
+              </svg>
+              {shapeTextOverlay}
+            </div>
+          );
+        }
+        if (element.shapeType === 'arrow') {
+          const markerId = `arrowhead-${element.id}`;
+          return (
+            <div 
+              style={{ position: 'relative', width: '100%', height: '100%' }}
+              onDoubleClick={() => setIsEditingText(true)}
+            >
+              <svg width="100%" height="100%" style={{ overflow: 'visible' }}>
+                <defs>
+                  <marker 
+                    id={markerId} 
+                    viewBox="0 0 10 10" 
+                    refX="6" 
+                    refY="5" 
+                    markerWidth="8" 
+                    markerHeight="8" 
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill={getAdaptedBorderColor(element.borderColor)} />
+                  </marker>
+                </defs>
+                <line 
+                  x1="0" 
+                  y1="0" 
+                  x2={element.width} 
+                  y2={element.height} 
+                  stroke={getAdaptedBorderColor(element.borderColor)} 
+                  strokeWidth={element.borderWidth} 
+                  markerEnd={`url(#${markerId})`} 
+                />
+              </svg>
+              {shapeTextOverlay}
+            </div>
+          );
+        }
+        if (element.shapeType === 'elbow') {
+          const halfWidth = element.width / 2;
+          const d = `M 0 0 L ${halfWidth} 0 L ${halfWidth} ${element.height} L ${element.width} ${element.height}`;
+          return (
+            <div 
+              style={{ position: 'relative', width: '100%', height: '100%' }}
+              onDoubleClick={() => setIsEditingText(true)}
+            >
+              <svg width="100%" height="100%" style={{ overflow: 'visible' }}>
+                <path d={d} fill="none" stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} />
+              </svg>
+              {shapeTextOverlay}
             </div>
           );
         }

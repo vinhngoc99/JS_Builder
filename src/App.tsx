@@ -6,12 +6,12 @@ import { PropertiesPanel } from './components/PropertiesPanel';
 import './App.css';
 
 function AppContent() {
-  const { theme } = useBuilder();
+  const { theme, isPresenting } = useBuilder();
   return (
-    <div className={`app-container ${theme}-theme`}>
-      <Toolbar />
+    <div className={`app-container ${theme}-theme ${isPresenting ? 'is-presenting' : ''}`}>
+      {!isPresenting && <Toolbar />}
       <Canvas />
-      <PropertiesPanel />
+      {!isPresenting && <PropertiesPanel />}
     </div>
   );
 }
