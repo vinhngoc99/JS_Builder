@@ -22,7 +22,7 @@ const Toggle = ({ label, checked, onChange, color = '#4caf50' }: { label: string
 
 
 export const PropertiesPanel: React.FC = () => {
-  const { elements, selectedIds, updateElement, removeElement, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, alignElements, distributeElements, isPresenting, setIsPresenting } = useBuilder();
+  const { elements, selectedIds, updateElement, removeElement, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, isPresenting, setIsPresenting } = useBuilder();
 
   const lastSelectedId = selectedIds[selectedIds.length - 1];
   const selectedElement = elements.find(el => el.id === lastSelectedId);
@@ -82,12 +82,13 @@ export const PropertiesPanel: React.FC = () => {
   // --- Empty ---
   if (!selectedElement && !selectedConnectionId) {
     return (
-      <div className="properties-panel">
+      <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', padding: '10px 0' }}>
           <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Global Settings</div>
           <Divider />
           <Toggle label="Light Theme" checked={theme === 'light'} onChange={(v) => setTheme(v ? 'light' : 'dark')} color="#4caf50" />
           <Toggle label="Enable Snapping" checked={isSnapEnabled} onChange={(v) => setIsSnapEnabled(v)} color="#4caf50" />
+          <Toggle label="Enable Blur" checked={isBlurEnabled} onChange={(v) => setIsBlurEnabled(v)} color="#4caf50" />
           <Divider />
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <p style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Select an element to view properties</p>
@@ -105,7 +106,7 @@ export const PropertiesPanel: React.FC = () => {
     const sc = connections.find(c => c.id === selectedConnectionId);
     if (!sc) return null;
     return (
-      <div className="properties-panel">
+      <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
         <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '12px' }}>Connection</div>
         <Label>Label</Label>
         <input type="text" value={sc.label || ''} onChange={(e) => updateConnection(sc.id, { label: e.target.value })} placeholder="Label..." />
@@ -204,7 +205,7 @@ export const PropertiesPanel: React.FC = () => {
   };
 
   return (
-    <div className="properties-panel">
+    <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
       {selectedIds.length > 1 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
           <div style={{ padding: '6px 10px', background: 'rgba(76, 175, 80, 0.15)', borderRadius: '6px', fontSize: '11px', color: '#4caf50', fontWeight: 600, textAlign: 'center' }}>

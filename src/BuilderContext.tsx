@@ -91,6 +91,8 @@ interface BuilderContextType {
   selectAll: () => void;
   isSnapEnabled: boolean;
   setIsSnapEnabled: (enabled: boolean) => void;
+  isBlurEnabled: boolean;
+  setIsBlurEnabled: (enabled: boolean) => void;
   
   addElement: (type: ElementType, pos?: { x: number, y: number }, additionalProps?: Partial<CanvasElement>) => void;
   updateElement: (id: string, updates: Partial<CanvasElement>) => void;
@@ -142,6 +144,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [copiedElements, setCopiedElements] = useState<CanvasElement[]>([]);
   const [isSnapEnabled, setIsSnapEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('js-builder-snap');
+    return saved !== 'false';
+  });
+  const [isBlurEnabled, setIsBlurEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('js-builder-blur');
     return saved !== 'false';
   });
 
@@ -290,6 +296,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const handleSetIsSnapEnabled = (val: boolean) => {
     setIsSnapEnabled(val);
     localStorage.setItem('js-builder-snap', String(val));
+  };
+
+  const handleSetIsBlurEnabled = (val: boolean) => {
+    setIsBlurEnabled(val);
+    localStorage.setItem('js-builder-blur', String(val));
   };
 
   const undo = useCallback(() => {
@@ -1492,6 +1503,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       setScale, setPan, exportHTML, alignElements, distributeElements, isPresenting, setIsPresenting, editingFocalPointId, setEditingFocalPointId,
       brushStrokes, isBrushMode, brushColor, brushWidth, setBrushMode, setBrushColor, setBrushWidth, addBrushStroke, clearBrush, undo, redo, saveHistory,
       theme, setTheme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, setIsSnapEnabled: handleSetIsSnapEnabled,
+      isBlurEnabled, setIsBlurEnabled: handleSetIsBlurEnabled,
       currentSlideIndex, setCurrentSlideIndex, revealDownstream,
       isHelpOpen, setIsHelpOpen
     }}>
