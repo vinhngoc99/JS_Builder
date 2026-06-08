@@ -11,16 +11,29 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
   const { 
     elements, selectedIds, selectElement, updateElement, setConnectingNode, connectingNode, 
     addConnection, scale, editingFocalPointId, setEditingFocalPointId, saveHistory, isSnapEnabled, guides,
-    isPresenting, currentSlideIndex, setCurrentSlideIndex, revealDownstream
+    isPresenting, currentSlideIndex, setCurrentSlideIndex, revealDownstream, isBrushMode,
+    showAlert
   } = useBuilder();
+
+  const elementsRef = useRef(elements);
+  const selectedIdsRef = useRef(selectedIds);
+  const scaleRef = useRef(scale);
+  const isSnapEnabledRef = useRef(isSnapEnabled);
+  const guidesRef = useRef(guides);
+  const elementRef = useRef(element);
+
+  elementsRef.current = elements;
+  selectedIdsRef.current = selectedIds;
+  scaleRef.current = scale;
+  isSnapEnabledRef.current = isSnapEnabled;
+  guidesRef.current = guides;
+  elementRef.current = element;
+
   const isSelected = selectedIds.includes(element.id);
   const isEditingFocalPoint = editingFocalPointId === element.id;
   const wrapperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState<string | null>(null);
-  const [isRotating, setIsRotating] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
   const editableRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
@@ -229,7 +242,194 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
       .map(el => ({ id: el.id, x: el.x, y: el.y }));
 
     startElement.current = { x: element.x, y: element.y, w: element.width, h: element.height };
-    setIsDragging(true);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const currentScale = scaleRef.current;
+      const currentIsSnapEnabled = isSnapEnabledRef.current;
+      const currentElement = elementRef.current;
+      const currentElements = elementsRef.current;
+      const currentSelectedIds = selectedIdsRef.current;
+      const currentGuides = guidesRef.current;
+
+      const dx = (moveEvent.clientX - startPos.current.x) / currentScale;
+      const dy = (moveEvent.clientY - startPos.current.y) / currentScale;
+
+      let finalDx = dx;
+      let finalDy = dy;
+
+      if (moveEvent.shiftKey) {
+        if (Math.abs(dx) > Math.abs(dy)) {
+          finalDy = 0;
+        } else {
+          finalDx = 0;
+        }
+      }
+
+      let snapX: number | null = null;
+      let snapY: number | null = null;
+
+      if (currentIsSnapEnabled && !moveEvent.shiftKey) {
+        const rawX = startElement.current.x + dx;
+        const rawY = startElement.current.y + dy;
+        const w = currentElement.width;
+        const h = currentElement.height;
+
+        const snapXCandidates: { val: number; diff: number }[] = [];
+        const snapYCandidates: { val: number; diff: number }[] = [];
+
+        currentElements.forEach(other => {
+          if (currentSelectedIds.includes(other.id) || other.parentId === currentElement.id || other.id === currentElement.id) return;
+          const ox = other.x;
+          const oy = other.y;
+          const ow = other.width;
+          const oh = other.height;
+
+          [ox, ox + ow / 2, ox + ow].forEach(targetX => {
+            [rawX, rawX + w / 2, rawX + w].forEach(sourceX => {
+              const diff = targetX - sourceX;
+              if (Math.abs(diff) < 8) {
+                const offset = sourceX - rawX;
+                snapXCandidates.push({ val: targetX - offset, diff: Math.abs(diff) });
+              }
+            });
+          });
+
+          [oy, oy + oh / 2, oy + oh].forEach(targetY => {
+            [rawY, rawY + h / 2, rawY + h].forEach(sourceY => {
+              const diff = targetY - sourceY;
+              if (Math.abs(diff) < 8) {
+                const offset = sourceY - rawY;
+                snapYCandidates.push({ val: targetY - offset, diff: Math.abs(diff) });
+              }
+            });
+          });
+        });
+
+        currentGuides.forEach(guide => {
+          if (guide.type === 'vertical') {
+            [rawX, rawX + w / 2, rawX + w].forEach(sourceX => {
+              const diff = guide.position - sourceX;
+              if (Math.abs(diff) < 8) {
+                const offset = sourceX - rawX;
+                snapXCandidates.push({ val: guide.position - offset, diff: Math.abs(diff) });
+              }
+            });
+          } else {
+            [rawY, rawY + h / 2, rawY + h].forEach(sourceY => {
+              const diff = guide.position - sourceY;
+              if (Math.abs(diff) < 8) {
+                const offset = sourceY - rawY;
+                snapYCandidates.push({ val: guide.position - offset, diff: Math.abs(diff) });
+              }
+            });
+          }
+        });
+
+        if (snapXCandidates.length > 0) {
+          snapXCandidates.sort((a, b) => a.diff - b.diff);
+          const bestSnapX = snapXCandidates[0].val;
+          finalDx = bestSnapX - startElement.current.x;
+          snapX = bestSnapX;
+        }
+        if (snapYCandidates.length > 0) {
+          snapYCandidates.sort((a, b) => a.diff - b.diff);
+          const bestSnapY = snapYCandidates[0].val;
+          finalDy = bestSnapY - startElement.current.y;
+          snapY = bestSnapY;
+        }
+
+        const setSnapGuides = (window as any).setSnapGuides;
+        if (setSnapGuides) {
+          let guideLineX: number | null = null;
+          let guideLineY: number | null = null;
+          const w = currentElement.width;
+          const h = currentElement.height;
+
+          if (snapX !== null) {
+            const targetCoordsX = [
+              ...currentElements.filter(o => !currentSelectedIds.includes(o.id) && o.parentId !== currentElement.id && o.id !== currentElement.id).flatMap(o => [o.x, o.x + o.width/2, o.x + o.width]),
+              ...currentGuides.filter(g => g.type === 'vertical').map(g => g.position)
+            ];
+            const closestX = targetCoordsX.find(tx => Math.abs(tx - (snapX! + w/2)) < 2 || Math.abs(tx - snapX!) < 2 || Math.abs(tx - (snapX! + w)) < 2);
+            if (closestX !== undefined) guideLineX = closestX;
+          }
+          if (snapY !== null) {
+            const targetCoordsY = [
+              ...currentElements.filter(o => !currentSelectedIds.includes(o.id) && o.parentId !== currentElement.id && o.id !== currentElement.id).flatMap(o => [o.y, o.y + o.height/2, o.y + o.height]),
+              ...currentGuides.filter(g => g.type === 'horizontal').map(g => g.position)
+            ];
+            const closestY = targetCoordsY.find(ty => Math.abs(ty - (snapY! + h/2)) < 2 || Math.abs(ty - snapY!) < 2 || Math.abs(ty - (snapY! + h)) < 2);
+            if (closestY !== undefined) guideLineY = closestY;
+          }
+          setSnapGuides({ x: guideLineX, y: guideLineY });
+        }
+      }
+
+      startPositions.current.forEach(pos => { 
+        updateElement(pos.id, { x: pos.x + finalDx, y: pos.y + finalDy }); 
+      });
+    };
+
+    const handlePointerUp = (upEvent: PointerEvent) => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+
+      const setSnapGuides = (window as any).setSnapGuides;
+      if (setSnapGuides) setSnapGuides({ x: null, y: null });
+
+      saveHistory();
+
+      const currentElement = elementRef.current;
+      const currentElements = elementsRef.current;
+
+      if (startPositions.current.length === 1) {
+        // Parenting logic
+        const wrapper = wrapperRef.current;
+        if (wrapper) {
+          const totalMove = Math.sqrt(Math.pow(upEvent.clientX - startPos.current.x, 2) + Math.pow(upEvent.clientY - startPos.current.y, 2));
+          if (totalMove < 5) return;
+
+          wrapper.classList.add('pointer-events-none');
+          const target = document.elementFromPoint(upEvent.clientX, upEvent.clientY);
+          wrapper.classList.remove('pointer-events-none');
+
+          const nodeTarget = target?.closest('.is-node');
+          const targetId = nodeTarget?.getAttribute('data-id');
+
+          if (targetId && targetId !== currentElement.id && currentElement.type !== 'node') {
+            if (currentElement.parentId === targetId) return;
+
+            const parent = currentElements.find(el => el.id === targetId);
+            if (parent) {
+              let absX = currentElement.x;
+              let absY = currentElement.y;
+              if (currentElement.parentId) {
+                const oldParent = currentElements.find(el => el.id === currentElement.parentId);
+                if (oldParent) { absX += oldParent.x + 16; absY += oldParent.y + 45 + 16; }
+              }
+              
+              updateElement(currentElement.id, { 
+                parentId: targetId, 
+                x: absX - parent.x - 16, 
+                y: absY - (parent.y + 45 + 16)
+              });
+            }
+          } else if (!nodeTarget && currentElement.parentId) {
+            const oldParent = currentElements.find(el => el.id === currentElement.parentId);
+            if (oldParent) {
+              updateElement(currentElement.id, { 
+                parentId: null, 
+                x: currentElement.x + oldParent.x + 16, 
+                y: currentElement.y + oldParent.y + 45 + 16 
+              });
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
   };
 
   const handleFocalPointPointerDown = (e: React.PointerEvent) => {
@@ -275,168 +475,30 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
 
     startPos.current = { x: e.clientX, y: e.clientY };
     startElement.current = { x: element.x, y: element.y, w: element.width, h: element.height };
-    setIsResizing(handle);
-  };
 
-  const handleRotateStart = (e: React.PointerEvent) => {
-    e.stopPropagation();
-    if (!isSelected) selectElement(element.id);
-    
-    const currentSelected = selectedIds.includes(element.id) ? selectedIds : [...selectedIds, element.id];
-    startRotations.current = elements
-      .filter(el => currentSelected.includes(el.id))
-      .map(el => ({ id: el.id, rotation: el.rotation || 0 }));
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const currentScale = scaleRef.current;
+      const currentIsSnapEnabled = isSnapEnabledRef.current;
+      const currentElement = elementRef.current;
+      const currentElements = elementsRef.current;
+      const currentSelectedIds = selectedIdsRef.current;
+      const currentGuides = guidesRef.current;
 
-    setIsRotating(true);
-  };
+      const dx = (moveEvent.clientX - startPos.current.x) / currentScale;
+      const dy = (moveEvent.clientY - startPos.current.y) / currentScale;
 
-  useEffect(() => {
-    const handlePointerMove = (e: PointerEvent) => {
-      if (!isDragging && !isResizing && !isRotating) return;
-      if (isRotating && wrapperRef.current) {
-        const rect = wrapperRef.current.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2, centerY = rect.top + rect.height / 2;
-        const rad = Math.atan2(e.clientY - centerY, e.clientX - centerX);
-        let deg = (rad * (180 / Math.PI)) + 90;
-        if (deg < 0) deg += 360;
-        deg = Math.round(deg);
-        
-        const primaryStartRot = startRotations.current.find(r => r.id === element.id)?.rotation || 0;
-        const deltaRot = deg - primaryStartRot;
-
-        startRotations.current.forEach(r => {
-          updateElement(r.id, { rotation: (r.rotation + deltaRot) % 360 });
-        });
-        return;
-      }
-      
-      const dx = (e.clientX - startPos.current.x) / scale;
-      const dy = (e.clientY - startPos.current.y) / scale;
-
-      if (isDragging) {
-        let snapX: number | null = null;
-        let snapY: number | null = null;
-        let finalDx = dx;
-        let finalDy = dy;
-
-        if (e.shiftKey) {
-          if (Math.abs(dx) > Math.abs(dy)) {
-            finalDy = 0;
-          } else {
-            finalDx = 0;
-          }
-        }
-
-        if (isSnapEnabled && !e.shiftKey) {
-          const rawX = startElement.current.x + dx;
-          const rawY = startElement.current.y + dy;
-          const w = element.width;
-          const h = element.height;
-
-          const snapXCandidates: { val: number; diff: number }[] = [];
-          const snapYCandidates: { val: number; diff: number }[] = [];
-
-          elements.forEach(other => {
-            if (selectedIds.includes(other.id) || other.parentId === element.id || other.id === element.id) return;
-            const ox = other.x;
-            const oy = other.y;
-            const ow = other.width;
-            const oh = other.height;
-
-            [ox, ox + ow / 2, ox + ow].forEach(targetX => {
-              [rawX, rawX + w / 2, rawX + w].forEach(sourceX => {
-                const diff = targetX - sourceX;
-                if (Math.abs(diff) < 8) {
-                  const offset = sourceX - rawX;
-                  snapXCandidates.push({ val: targetX - offset, diff: Math.abs(diff) });
-                }
-              });
-            });
-
-            [oy, oy + oh / 2, oy + oh].forEach(targetY => {
-              [rawY, rawY + h / 2, rawY + h].forEach(sourceY => {
-                const diff = targetY - sourceY;
-                if (Math.abs(diff) < 8) {
-                  const offset = sourceY - rawY;
-                  snapYCandidates.push({ val: targetY - offset, diff: Math.abs(diff) });
-                }
-              });
-            });
-          });
-
-          guides.forEach(guide => {
-            if (guide.type === 'vertical') {
-              [rawX, rawX + w / 2, rawX + w].forEach(sourceX => {
-                const diff = guide.position - sourceX;
-                if (Math.abs(diff) < 8) {
-                  const offset = sourceX - rawX;
-                  snapXCandidates.push({ val: guide.position - offset, diff: Math.abs(diff) });
-                }
-              });
-            } else {
-              [rawY, rawY + h / 2, rawY + h].forEach(sourceY => {
-                const diff = guide.position - sourceY;
-                if (Math.abs(diff) < 8) {
-                  const offset = sourceY - rawY;
-                  snapYCandidates.push({ val: guide.position - offset, diff: Math.abs(diff) });
-                }
-              });
-            }
-          });
-
-          if (snapXCandidates.length > 0) {
-            snapXCandidates.sort((a, b) => a.diff - b.diff);
-            const bestSnapX = snapXCandidates[0].val;
-            finalDx = bestSnapX - startElement.current.x;
-            snapX = bestSnapX;
-          }
-          if (snapYCandidates.length > 0) {
-            snapYCandidates.sort((a, b) => a.diff - b.diff);
-            const bestSnapY = snapYCandidates[0].val;
-            finalDy = bestSnapY - startElement.current.y;
-            snapY = bestSnapY;
-          }
-        }
-
-        const setSnapGuides = (window as any).setSnapGuides;
-        if (setSnapGuides) {
-          let guideLineX: number | null = null;
-          let guideLineY: number | null = null;
-          const w = element.width;
-          const h = element.height;
-
-          if (snapX !== null) {
-            const targetCoordsX = [
-              ...elements.filter(o => !selectedIds.includes(o.id) && o.parentId !== element.id && o.id !== element.id).flatMap(o => [o.x, o.x + o.width/2, o.x + o.width]),
-              ...guides.filter(g => g.type === 'vertical').map(g => g.position)
-            ];
-            const closestX = targetCoordsX.find(tx => Math.abs(tx - (snapX! + w/2)) < 2 || Math.abs(tx - snapX!) < 2 || Math.abs(tx - (snapX! + w)) < 2);
-            if (closestX !== undefined) guideLineX = closestX;
-          }
-          if (snapY !== null) {
-            const targetCoordsY = [
-              ...elements.filter(o => !selectedIds.includes(o.id) && o.parentId !== element.id && o.id !== element.id).flatMap(o => [o.y, o.y + o.height/2, o.y + o.height]),
-              ...guides.filter(g => g.type === 'horizontal').map(g => g.position)
-            ];
-            const closestY = targetCoordsY.find(ty => Math.abs(ty - (snapY! + h/2)) < 2 || Math.abs(ty - snapY!) < 2 || Math.abs(ty - (snapY! + h)) < 2);
-            if (closestY !== undefined) guideLineY = closestY;
-          }
-          setSnapGuides({ x: guideLineX, y: guideLineY });
-        }
-
-        startPositions.current.forEach(pos => { updateElement(pos.id, { x: pos.x + finalDx, y: pos.y + finalDy }); });
-      } else if (isResizing && startBox.current) {
+      if (startBox.current) {
         let finalDx = dx;
         let finalDy = dy;
         let snapX: number | null = null;
         let snapY: number | null = null;
 
-        if (isSnapEnabled && !e.shiftKey && !e.altKey) {
+        if (currentIsSnapEnabled && !moveEvent.shiftKey && !moveEvent.altKey) {
           const snapXCandidates: { val: number; diff: number }[] = [];
           const snapYCandidates: { val: number; diff: number }[] = [];
 
-          elements.forEach(other => {
-            if (selectedIds.includes(other.id) || other.parentId === element.id || other.id === element.id) return;
+          currentElements.forEach(other => {
+            if (currentSelectedIds.includes(other.id) || other.parentId === currentElement.id || other.id === currentElement.id) return;
             const ox = other.x;
             const oy = other.y;
             const ow = other.width;
@@ -445,13 +507,13 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
             const otherEdgesX = [ox, ox + ow / 2, ox + ow];
             const otherEdgesY = [oy, oy + oh / 2, oy + oh];
 
-            if (isResizing.includes('e')) {
+            if (handle.includes('e')) {
               const rawRight = startElement.current.x + startElement.current.w + dx;
               otherEdgesX.forEach(tx => {
                 const diff = tx - rawRight;
                 if (Math.abs(diff) < 8) snapXCandidates.push({ val: tx, diff: Math.abs(diff) });
               });
-            } else if (isResizing.includes('w')) {
+            } else if (handle.includes('w')) {
               const rawLeft = startElement.current.x + dx;
               otherEdgesX.forEach(tx => {
                 const diff = tx - rawLeft;
@@ -459,13 +521,13 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
               });
             }
 
-            if (isResizing.includes('s')) {
+            if (handle.includes('s')) {
               const rawBottom = startElement.current.y + startElement.current.h + dy;
               otherEdgesY.forEach(ty => {
                 const diff = ty - rawBottom;
                 if (Math.abs(diff) < 8) snapYCandidates.push({ val: ty, diff: Math.abs(diff) });
               });
-            } else if (isResizing.includes('n')) {
+            } else if (handle.includes('n')) {
               const rawTop = startElement.current.y + dy;
               otherEdgesY.forEach(ty => {
                 const diff = ty - rawTop;
@@ -474,23 +536,23 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
             }
           });
 
-          guides.forEach(guide => {
+          currentGuides.forEach(guide => {
             if (guide.type === 'vertical') {
-              if (isResizing.includes('e')) {
+              if (handle.includes('e')) {
                 const rawRight = startElement.current.x + startElement.current.w + dx;
                 const diff = guide.position - rawRight;
                 if (Math.abs(diff) < 8) snapXCandidates.push({ val: guide.position, diff: Math.abs(diff) });
-              } else if (isResizing.includes('w')) {
+              } else if (handle.includes('w')) {
                 const rawLeft = startElement.current.x + dx;
                 const diff = guide.position - rawLeft;
                 if (Math.abs(diff) < 8) snapXCandidates.push({ val: guide.position, diff: Math.abs(diff) });
               }
             } else {
-              if (isResizing.includes('s')) {
+              if (handle.includes('s')) {
                 const rawBottom = startElement.current.y + startElement.current.h + dy;
                 const diff = guide.position - rawBottom;
                 if (Math.abs(diff) < 8) snapYCandidates.push({ val: guide.position, diff: Math.abs(diff) });
-              } else if (isResizing.includes('n')) {
+              } else if (handle.includes('n')) {
                 const rawTop = startElement.current.y + dy;
                 const diff = guide.position - rawTop;
                 if (Math.abs(diff) < 8) snapYCandidates.push({ val: guide.position, diff: Math.abs(diff) });
@@ -501,18 +563,18 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
           if (snapXCandidates.length > 0) {
             snapXCandidates.sort((a, b) => a.diff - b.diff);
             snapX = snapXCandidates[0].val;
-            if (isResizing.includes('e')) {
+            if (handle.includes('e')) {
               finalDx = snapX - (startElement.current.x + startElement.current.w);
-            } else if (isResizing.includes('w')) {
+            } else if (handle.includes('w')) {
               finalDx = snapX - startElement.current.x;
             }
           }
           if (snapYCandidates.length > 0) {
             snapYCandidates.sort((a, b) => a.diff - b.diff);
             snapY = snapYCandidates[0].val;
-            if (isResizing.includes('s')) {
+            if (handle.includes('s')) {
               finalDy = snapY - (startElement.current.y + startElement.current.h);
-            } else if (isResizing.includes('n')) {
+            } else if (handle.includes('n')) {
               finalDy = snapY - startElement.current.y;
             }
           }
@@ -529,9 +591,9 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
         let newX = startElement.current.x;
         let newY = startElement.current.y;
 
-        if (e.altKey) {
-          const dragX = isResizing.includes('w') ? -finalDx : finalDx;
-          const dragY = isResizing.includes('n') ? -finalDy : finalDy;
+        if (moveEvent.altKey) {
+          const dragX = handle.includes('w') ? -finalDx : finalDx;
+          const dragY = handle.includes('n') ? -finalDy : finalDy;
           if (Math.abs(dragX) > Math.abs(dragY)) {
             newW = startElement.current.w + dragX;
             newH = newW / ratio;
@@ -540,22 +602,22 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
             newW = newH * ratio;
           }
         } else {
-          if (isResizing.includes('w')) {
+          if (handle.includes('w')) {
             newW = startElement.current.w - finalDx;
-          } else if (isResizing.includes('e')) {
+          } else if (handle.includes('e')) {
             newW = startElement.current.w + finalDx;
           }
-          if (isResizing.includes('n')) {
+          if (handle.includes('n')) {
             newH = startElement.current.h - finalDy;
-          } else if (isResizing.includes('s')) {
+          } else if (handle.includes('s')) {
             newH = startElement.current.h + finalDy;
           }
         }
 
-        if (isResizing.includes('w')) {
+        if (handle.includes('w')) {
           newX = startElement.current.x + (startElement.current.w - newW);
         }
-        if (isResizing.includes('n')) {
+        if (handle.includes('n')) {
           newY = startElement.current.y + (startElement.current.h - newH);
         }
 
@@ -568,10 +630,10 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
           let newBoxX = box.x;
           let newBoxY = box.y;
 
-          if (isResizing.includes('w')) {
+          if (handle.includes('w')) {
             newBoxX = box.x + box.w - newBoxW;
           }
-          if (isResizing.includes('n')) {
+          if (handle.includes('n')) {
             newBoxY = box.y + box.h - newBoxH;
           }
 
@@ -586,73 +648,58 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
         }
       }
     };
-    const handlePointerUp = (e: PointerEvent) => {
-      if (!isDragging && !isResizing && !isRotating) return;
-      
+
+    const handlePointerUp = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+
       const setSnapGuides = (window as any).setSnapGuides;
       if (setSnapGuides) setSnapGuides({ x: null, y: null });
 
-      const wasDragging = isDragging;
-      setIsDragging(false); setIsResizing(null); setIsRotating(false);
       saveHistory();
+    };
 
-      if (wasDragging && startPositions.current.length === 1) {
-        // Parenting logic
-        const wrapper = wrapperRef.current;
-        if (wrapper) {
-          // Avoid parenting logic if mouse hasn't moved much (simple click)
-          const totalMove = Math.sqrt(Math.pow(e.clientX - startPos.current.x, 2) + Math.pow(e.clientY - startPos.current.y, 2));
-          if (totalMove < 5) return;
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
 
-          const oldPointerEvents = wrapper.style.pointerEvents;
-          wrapper.style.pointerEvents = 'none';
-          const target = document.elementFromPoint(e.clientX, e.clientY);
-          wrapper.style.pointerEvents = oldPointerEvents;
+  const handleRotateStart = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    if (!isSelected) selectElement(element.id);
+    
+    const currentSelected = selectedIds.includes(element.id) ? selectedIds : [...selectedIds, element.id];
+    startRotations.current = elements
+      .filter(el => currentSelected.includes(el.id))
+      .map(el => ({ id: el.id, rotation: el.rotation || 0 }));
 
-          const nodeTarget = target?.closest('.is-node');
-          const targetId = nodeTarget?.getAttribute('data-id');
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (wrapperRef.current) {
+        const rect = wrapperRef.current.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2, centerY = rect.top + rect.height / 2;
+        const rad = Math.atan2(moveEvent.clientY - centerY, moveEvent.clientX - centerX);
+        let deg = (rad * (180 / Math.PI)) + 90;
+        if (deg < 0) deg += 360;
+        deg = Math.round(deg);
+        
+        const primaryStartRot = startRotations.current.find(r => r.id === element.id)?.rotation || 0;
+        const deltaRot = deg - primaryStartRot;
 
-          if (targetId && targetId !== element.id && element.type !== 'node') {
-            // Already in this node?
-            if (element.parentId === targetId) return;
-
-            const parent = elements.find(el => el.id === targetId);
-            if (parent) {
-              // Convert current coordinates to ABSOLUTE first if they were relative
-              let absX = element.x;
-              let absY = element.y;
-              if (element.parentId) {
-                const oldParent = elements.find(el => el.id === element.parentId);
-                if (oldParent) { absX += oldParent.x + 16; absY += oldParent.y + 45 + 16; }
-              }
-              
-              // Now convert absolute to NEW relative
-              updateElement(element.id, { 
-                parentId: targetId, 
-                x: absX - parent.x - 16, 
-                y: absY - (parent.y + 45 + 16)
-              });
-            }
-          } else if (!nodeTarget && element.parentId) {
-            // Drop outside to root
-            const oldParent = elements.find(el => el.id === element.parentId);
-            if (oldParent) {
-              updateElement(element.id, { 
-                parentId: null, 
-                x: element.x + oldParent.x + 16, 
-                y: element.y + oldParent.y + 45 + 16 
-              });
-            }
-          }
-        }
+        startRotations.current.forEach(r => {
+          updateElement(r.id, { rotation: (r.rotation + deltaRot) % 360 });
+        });
       }
     };
-    if (isDragging || isResizing || isRotating) {
-      window.addEventListener('pointermove', handlePointerMove);
-      window.addEventListener('pointerup', handlePointerUp);
-    }
-    return () => { window.removeEventListener('pointermove', handlePointerMove); window.removeEventListener('pointerup', handlePointerUp); };
-  }, [isDragging, isResizing, isRotating, element, elements, updateElement, scale, saveHistory]);
+
+    const handlePointerUp = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+
+      saveHistory();
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
 
   const handlePortDown = (e: React.PointerEvent, port: PortPosition) => { e.stopPropagation(); setConnectingNode({ id: element.id, port }); };
   const handlePortUp = (e: React.PointerEvent, port: PortPosition) => {
@@ -817,7 +864,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
               const target = element.actionTarget;
               
               if (action === 'alert') {
-                alert(target || 'Button clicked!');
+                showAlert(target || 'Button clicked!', 'Notification');
               } else if (action === 'link') {
                 if (element.link) {
                   window.open(element.link, '_blank', 'noopener,noreferrer');
@@ -1135,10 +1182,17 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
   return (
     <div 
       ref={wrapperRef}
-      className={`element-wrapper ${element.type === 'node' ? 'is-node' : ''} ${element.type === 'button' ? 'is-button' : ''} ${isSelected ? 'selected' : ''} ${isConnectingToThis ? 'connecting' : ''} ${element.isDisabled ? 'disabled' : ''} ${element.isHidden ? 'is-hidden' : ''}`}
+      className={`element-wrapper ${element.type === 'node' ? 'is-node' : ''} ${element.type === 'button' ? 'is-button' : ''} ${isSelected ? 'selected' : ''} ${isConnectingToThis ? 'connecting' : ''} ${element.isDisabled ? 'disabled' : ''} ${element.isHidden ? 'is-hidden' : ''} ${isBrushMode ? 'pointer-events-none' : ''}`}
       data-id={element.id}
-      style={{ left: isFillParent ? 0 : element.x, top: isFillParent ? 0 : element.y, width: isFillParent ? '100%' : element.width, height: isFillParent ? '100%' : element.height, transform: isFillParent ? 'none' : `rotate(${element.rotation || 0}deg)`, backgroundColor: element.type === 'node' ? getAdaptedBgColor('node', element.backgroundColor) : undefined }}
+      style={{ left: isFillParent ? 0 : element.x, top: isFillParent ? 0 : element.y, width: isFillParent ? '100%' : element.width, height: isFillParent ? '100%' : element.height, transform: isFillParent ? 'none' : `rotate(${element.rotation || 0}deg)`, backgroundColor: element.type === 'node' ? getAdaptedBgColor('node', element.backgroundColor) : undefined, pointerEvents: isBrushMode ? 'none' : 'auto' }}
       onPointerDown={handlePointerDown}
+      onDoubleClick={(e) => {
+        if (isPresenting) return;
+        if (['text', 'button', 'shape'].includes(element.type)) {
+          e.stopPropagation();
+          setIsEditingText(true);
+        }
+      }}
     >
       {element.type === 'node' && (
         <div className="element-header" style={{ fontFamily: element.fontFamily, fontSize: `${elAny.fontSize || 14}px` }}>
@@ -1177,7 +1231,15 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
           )}
         </div>
       )}
-      <div ref={contentRef} className="element-content">{renderContent()}</div>
+      <div 
+        ref={contentRef} 
+        className="element-content"
+        style={{
+          pointerEvents: isEditingText ? 'auto' : (isPresenting ? 'auto' : (['text', 'button', 'shape'].includes(element.type) ? 'none' : 'auto'))
+        }}
+      >
+        {renderContent()}
+      </div>
       {!element.parentId && !isEditingFocalPoint && (
         <>
           <div className="node-handle top" onPointerDown={(e) => handlePortDown(e, 'top')} onPointerUp={(e) => handlePortUp(e, 'top')} />

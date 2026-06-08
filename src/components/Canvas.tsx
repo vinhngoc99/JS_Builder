@@ -10,9 +10,10 @@ export const Canvas: React.FC = () => {
     selectedIds, selectedConnectionId, selectConnection, removeElement, removeConnection, 
     scale, setScale, pan, setPan, editingFocalPointId, setEditingFocalPointId, 
     addElement, removeSelected, duplicateSelected,
-    brushStrokes, isBrushMode, brushColor, brushWidth, setBrushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo,
+    brushStrokes, isBrushMode, brushColor, brushWidth, setBrushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo, saveHistory,
     theme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, isPresenting, setIsPresenting,
-    currentSlideIndex, setCurrentSlideIndex, isHelpOpen, setIsHelpOpen
+    currentSlideIndex, setCurrentSlideIndex, isHelpOpen, setIsHelpOpen,
+    brushTool, setBrushTool, eraseBrushStrokesAt
   } = useBuilder();
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -22,6 +23,8 @@ export const Canvas: React.FC = () => {
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
   const [currentStroke, setCurrentStroke] = useState<{ x: number, y: number }[] | null>(null);
+  const [isErasing, setIsErasing] = useState(false);
+  const lastEraserPos = useRef<{ x: number, y: number } | null>(null);
   
   const [snapGuides, setSnapGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const [draggedGuide, setDraggedGuide] = useState<{ id: string; type: 'horizontal' | 'vertical'; isNew: boolean } | null>(null);
@@ -173,8 +176,28 @@ export const Canvas: React.FC = () => {
         else if (selectedConnectionId) removeConnection(selectedConnectionId);
       }
       if (e.ctrlKey && e.key === 'd' && !isInput) { e.preventDefault(); duplicateSelected(); }
-      if (e.key.toLowerCase() === 'b' && !isInput) { setBrushMode(!isBrushMode); }
-      if (e.key.toLowerCase() === 'x' && !isInput) { clearBrush(); }
+      if (e.key.toLowerCase() === 'b' && !isInput) {
+        e.preventDefault();
+        if (isBrushMode && brushTool === 'draw') {
+          setBrushMode(false);
+        } else {
+          setBrushMode(true);
+          setBrushTool('draw');
+        }
+      }
+      if (e.key.toLowerCase() === 'e' && !isInput) {
+        e.preventDefault();
+        if (isBrushMode && brushTool === 'erase') {
+          setBrushMode(false);
+        } else {
+          setBrushMode(true);
+          setBrushTool('erase');
+        }
+      }
+      if (e.key.toLowerCase() === 'x' && !isInput) {
+        e.preventDefault();
+        clearBrush();
+      }
       
       // Select All, Copy, Paste
       if (e.ctrlKey && e.key === 'a' && !isInput) { e.preventDefault(); selectAll(); }
@@ -190,7 +213,7 @@ export const Canvas: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting, isHelpOpen, setIsHelpOpen]);
+  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool]);
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -218,7 +241,17 @@ export const Canvas: React.FC = () => {
       startPanInfo.current = { startX: e.clientX, startY: e.clientY, initialPanX: pan.x, initialPanY: pan.y };
       return;
     }
-    if (isBrushMode) { setCurrentStroke([{ x, y }]); return; }
+    if (isBrushMode) {
+      if (brushTool === 'erase') {
+        saveHistory();
+        setIsErasing(true);
+        lastEraserPos.current = { x, y };
+        eraseBrushStrokesAt({ x, y }, null, brushWidth / 2);
+      } else {
+        setCurrentStroke([{ x, y }]);
+      }
+      return;
+    }
     if (!e.shiftKey) { selectElement(null); selectConnection(null); }
     setSelectionBox({ x1: x, y1: y, x2: x, y2: y });
   };
@@ -246,6 +279,12 @@ export const Canvas: React.FC = () => {
     }
 
     const x = (e.clientX - rect.left - pan.x) / scale, y = (e.clientY - rect.top - pan.y) / scale;
+    if (isErasing) {
+      const currentPos = { x, y };
+      eraseBrushStrokesAt(currentPos, lastEraserPos.current, brushWidth / 2);
+      lastEraserPos.current = currentPos;
+      return;
+    }
     if (currentStroke) { setCurrentStroke(prev => prev ? [...prev, { x, y }] : null); return; }
     if (isPanning) {
       setPan({
@@ -256,7 +295,7 @@ export const Canvas: React.FC = () => {
     }
     if (selectionBox) { setSelectionBox(prev => prev ? { ...prev, x2: x, y2: y } : null); return; }
     if (connectingNode) { setMousePos({ x, y }); }
-  }, [connectingNode, scale, pan, isPanning, setPan, currentStroke, selectionBox, draggedGuide, updateGuide]);
+  }, [connectingNode, scale, pan, isPanning, setPan, currentStroke, selectionBox, draggedGuide, updateGuide, isErasing, brushWidth, eraseBrushStrokesAt]);
 
   const handlePointerUp = useCallback((e: PointerEvent) => {
     if (draggedGuide) {
@@ -273,6 +312,11 @@ export const Canvas: React.FC = () => {
       return;
     }
 
+    if (isErasing) {
+      setIsErasing(false);
+      lastEraserPos.current = null;
+      return;
+    }
     if (currentStroke) { addBrushStroke({ id: uuidv4(), points: currentStroke, color: brushColor, width: brushWidth }); setCurrentStroke(null); }
     if (isPanning) setIsPanning(false);
     if (connectingNode) setConnectingNode(null);
@@ -282,7 +326,7 @@ export const Canvas: React.FC = () => {
       elements.filter(el => !el.parentId).forEach(el => { if (el.x >= xMin && el.x + el.width <= xMax && el.y >= yMin && el.y + el.height <= yMax) selectElement(el.id, true); });
       setSelectionBox(null);
     }
-  }, [currentStroke, isPanning, connectingNode, selectionBox, elements, selectElement, addBrushStroke, brushColor, brushWidth, setConnectingNode, draggedGuide, removeGuide]);
+  }, [currentStroke, isPanning, connectingNode, selectionBox, elements, selectElement, addBrushStroke, brushColor, brushWidth, setConnectingNode, draggedGuide, removeGuide, isErasing]);
 
   useEffect(() => {
     window.addEventListener('pointermove', handlePointerMove); window.addEventListener('pointerup', handlePointerUp);
@@ -425,7 +469,7 @@ export const Canvas: React.FC = () => {
       )}
 
       <div 
-        className={`canvas ${isSpaceDown ? 'space-down' : ''} ${isPanning ? 'panning' : ''} ${(isBrushMode && !isSpaceDown) ? 'brush-cursor' : ''}`}
+        className={`canvas ${isSpaceDown ? 'space-down' : ''} ${isPanning ? 'panning' : ''} ${(isBrushMode && !isSpaceDown) ? (brushTool === 'erase' ? 'eraser-cursor' : 'brush-cursor') : ''}`}
         ref={canvasRef}
         onPointerDown={handleCanvasPointerDown}
         style={{ backgroundPosition: `${pan.x}px ${pan.y}px`, backgroundSize: `${currentGridSize}px ${currentGridSize}px` }}
@@ -442,7 +486,7 @@ export const Canvas: React.FC = () => {
           }}
         >
           
-          <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute' }}>
+          <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute', pointerEvents: isBrushMode ? 'none' : 'auto' }}>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c6d80" />
@@ -513,7 +557,7 @@ export const Canvas: React.FC = () => {
                     borderTop: '1.5px dashed #ff5252', 
                     cursor: 'row-resize', 
                     zIndex: 1998, 
-                    pointerEvents: 'auto' 
+                    pointerEvents: isBrushMode ? 'none' : 'auto' 
                   }} 
                 />
               );
@@ -532,7 +576,7 @@ export const Canvas: React.FC = () => {
                     borderLeft: '1.5px dashed #ff5252', 
                     cursor: 'col-resize', 
                     zIndex: 1998, 
-                    pointerEvents: 'auto' 
+                    pointerEvents: isBrushMode ? 'none' : 'auto' 
                   }} 
                 />
               );
@@ -559,9 +603,36 @@ export const Canvas: React.FC = () => {
       </div>
 
       {!isPresenting && (
-        <div className="brush-toolbar" style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '10px', background: 'var(--bg-toolbar)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', zIndex: 1000, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', alignItems: 'center' }}>
-          <button className={`btn ${isBrushMode ? 'primary' : ''}`} onClick={() => setBrushMode(!isBrushMode)} title="Brush Tool (B)"><Pencil size={18} /></button>
-          <button className="btn" onClick={clearBrush} title="Clear Drawings (X)"><Eraser size={18} /></button>
+        <div className="brush-toolbar" style={{ position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '10px', background: 'var(--bg-toolbar)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', zIndex: 1000, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', alignItems: 'center' }}>
+          <button 
+            className={`btn ${isBrushMode && brushTool === 'draw' ? 'primary' : ''}`} 
+            onClick={() => {
+              if (isBrushMode && brushTool === 'draw') {
+                setBrushMode(false);
+              } else {
+                setBrushMode(true);
+                setBrushTool('draw');
+              }
+            }} 
+            title="Brush Tool (B)"
+          >
+            <Pencil size={18} />
+          </button>
+          <button 
+            className={`btn ${isBrushMode && brushTool === 'erase' ? 'primary' : ''}`} 
+            onClick={() => {
+              if (isBrushMode && brushTool === 'erase') {
+                setBrushMode(false);
+              } else {
+                setBrushMode(true);
+                setBrushTool('erase');
+              }
+            }} 
+            title="Eraser Tool (E)"
+          >
+            <Eraser size={18} />
+          </button>
+          <button className="btn" onClick={clearBrush} title="Clear All Drawings (X)"><Trash2 size={18} /></button>
           <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 5px' }} />
           <button className="btn" onClick={undo} title="Undo (Ctrl+Z)"><RotateCcw size={18} /></button>
           <button className="btn" onClick={redo} title="Redo (Ctrl+Shift+Z)"><RotateCw size={18} /></button>
@@ -750,7 +821,8 @@ export const Canvas: React.FC = () => {
                 <h3>Tools & View</h3>
                 <div className="shortcut-grid">
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>B</kbd></span><span className="shortcut-desc">Toggle brush tool</span></div>
-                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>X</kbd></span><span className="shortcut-desc">Clear drawings</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>E</kbd></span><span className="shortcut-desc">Toggle eraser tool</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>X</kbd></span><span className="shortcut-desc">Clear all drawings</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>Space</kbd> + Drag</span><span className="shortcut-desc">Pan canvas</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>Scroll Wheel</kbd></span><span className="shortcut-desc">Zoom in / out</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>H</kbd> / <kbd>?</kbd></span><span className="shortcut-desc">Toggle this Help shortcuts menu</span></div>

@@ -109,3 +109,13 @@ export interface BrushStroke {
   color: string;
   width: number;
 }
+
+export interface Variant {
+  id: string;
+  name: string;
+  elements: CanvasElement[];
+  connections: Connection[];
+  brushStrokes: BrushStroke[];
+  guides: { id: string; type: 'horizontal' | 'vertical'; position: number }[];
+}
+

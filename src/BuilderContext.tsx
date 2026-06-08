@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
-import { CanvasElement, ElementType, Connection, PortPosition, BrushStroke } from './types';
+import { CanvasElement, ElementType, Connection, PortPosition, BrushStroke, Variant } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 // --- Utilities ---
@@ -34,6 +34,21 @@ const debounce = <T extends (...args: any[]) => void>(fn: T, delay: number): T =
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   }) as T;
+};
+
+/** Calculate shortest distance from point p to line segment ab */
+const getDistanceToSegment = (
+  p: { x: number; y: number },
+  a: { x: number; y: number },
+  b: { x: number; y: number }
+): number => {
+  const l2 = Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2);
+  if (l2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = a.x + t * (b.x - a.x);
+  const projY = a.y + t * (b.y - a.y);
+  return Math.hypot(p.x - projX, p.y - projY);
 };
 
 export const getAdaptedTextColor = (color: string | undefined): string => {
@@ -122,25 +137,111 @@ interface BuilderContextType {
   undo: () => void;
   redo: () => void;
   saveHistory: () => void;
+  brushTool: 'draw' | 'erase';
+  setBrushTool: (tool: 'draw' | 'erase') => void;
+  eraseBrushStrokesAt: (currentPos: { x: number; y: number }, lastPos: { x: number; y: number } | null, radius: number) => void;
   currentSlideIndex: number;
   setCurrentSlideIndex: React.Dispatch<React.SetStateAction<number>>;
   revealDownstream: (startId: string) => void;
   isHelpOpen: boolean;
   setIsHelpOpen: (open: boolean) => void;
+  variants: Variant[];
+  activeVariantId: string;
+  switchVariant: (id: string) => void;
+  addVariant: () => void;
+  deleteVariant: (id: string) => void;
+  renameVariant: (id: string, name: string) => void;
+  importHTML: (htmlText: string) => boolean;
+  showAlert: (message: string, title?: string) => Promise<void>;
+  showConfirm: (message: string, title?: string) => Promise<boolean>;
 }
 
 const BuilderContext = createContext<BuilderContextType | undefined>(undefined);
 
 export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [elements, setElements] = useState<CanvasElement[]>(() => safeParse('js-builder-elements', []));
-  const [connections, setConnections] = useState<Connection[]>(() => safeParse('js-builder-connections', []));
-  const [brushStrokes, setBrushStrokes] = useState<BrushStroke[]>(() => safeParse('js-builder-brush', []));
+  const [variants, setVariants] = useState<Variant[]>(() => {
+    const saved = localStorage.getItem('js-builder-variants');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn("Failed to parse variants, using fallback", e);
+      }
+    }
+    const oldElements = safeParse('js-builder-elements', []);
+    const oldConnections = safeParse('js-builder-connections', []);
+    const oldBrush = safeParse('js-builder-brush', []);
+    const oldGuides = safeParse('js-builder-guides', []);
+    return [{
+      id: 'default',
+      name: 'Variant 1',
+      elements: oldElements,
+      connections: oldConnections,
+      brushStrokes: oldBrush,
+      guides: oldGuides
+    }];
+  });
+
+  const [activeVariantId, setActiveVariantIdState] = useState<string>(() => {
+    return localStorage.getItem('js-builder-active-variant') || 'default';
+  });
+
+  const [elements, setElements] = useState<CanvasElement[]>(() => {
+    const savedActiveId = localStorage.getItem('js-builder-active-variant') || 'default';
+    const savedVariants = localStorage.getItem('js-builder-variants');
+    if (savedVariants) {
+      try {
+        const parsed = JSON.parse(savedVariants) as Variant[];
+        const active = parsed.find(v => v.id === savedActiveId);
+        if (active) return active.elements;
+      } catch {}
+    }
+    return safeParse('js-builder-elements', []);
+  });
+
+  const [connections, setConnections] = useState<Connection[]>(() => {
+    const savedActiveId = localStorage.getItem('js-builder-active-variant') || 'default';
+    const savedVariants = localStorage.getItem('js-builder-variants');
+    if (savedVariants) {
+      try {
+        const parsed = JSON.parse(savedVariants) as Variant[];
+        const active = parsed.find(v => v.id === savedActiveId);
+        if (active) return active.connections;
+      } catch {}
+    }
+    return safeParse('js-builder-connections', []);
+  });
+
+  const [brushStrokes, setBrushStrokes] = useState<BrushStroke[]>(() => {
+    const savedActiveId = localStorage.getItem('js-builder-active-variant') || 'default';
+    const savedVariants = localStorage.getItem('js-builder-variants');
+    if (savedVariants) {
+      try {
+        const parsed = JSON.parse(savedVariants) as Variant[];
+        const active = parsed.find(v => v.id === savedActiveId);
+        if (active) return active.brushStrokes;
+      } catch {}
+    }
+    return safeParse('js-builder-brush', []);
+  });
 
   const [theme, setThemeState] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('js-builder-theme');
     return (saved === 'light' || saved === 'dark') ? saved : 'dark';
   });
-  const [guides, setGuides] = useState<{ id: string; type: 'horizontal' | 'vertical'; position: number }[]>(() => safeParse('js-builder-guides', []));
+
+  const [guides, setGuides] = useState<{ id: string; type: 'horizontal' | 'vertical'; position: number }[]>(() => {
+    const savedActiveId = localStorage.getItem('js-builder-active-variant') || 'default';
+    const savedVariants = localStorage.getItem('js-builder-variants');
+    if (savedVariants) {
+      try {
+        const parsed = JSON.parse(savedVariants) as Variant[];
+        const active = parsed.find(v => v.id === savedActiveId);
+        if (active) return active.guides;
+      } catch {}
+    }
+    return safeParse('js-builder-guides', []);
+  });
   const [copiedElements, setCopiedElements] = useState<CanvasElement[]>([]);
   const [isSnapEnabled, setIsSnapEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('js-builder-snap');
@@ -155,6 +256,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     setThemeState(t);
     localStorage.setItem('js-builder-theme', t);
   };
+
+  useEffect(() => {
+    document.body.className = theme === 'light' ? 'light-theme' : 'dark-theme';
+  }, [theme]);
 
   const addGuide = (type: 'horizontal' | 'vertical', position: number, id?: string) => {
     setGuides(prev => {
@@ -196,6 +301,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [isBrushMode, setIsBrushMode] = useState(false);
   const [brushColor, setBrushColorVal] = useState('#4caf50');
   const [brushWidth, setBrushWidthVal] = useState(4);
+  const [brushTool, setBrushTool] = useState<'draw' | 'erase'>('draw');
 
   // Refs to avoid stale closures in history callbacks
   const elementsRef = useRef(elements);
@@ -355,6 +461,176 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => { debouncedSaveElements(elements); }, [elements, debouncedSaveElements]);
   useEffect(() => { debouncedSaveConnections(connections); }, [connections, debouncedSaveConnections]);
   useEffect(() => { debouncedSaveBrush(brushStrokes); }, [brushStrokes, debouncedSaveBrush]);
+
+  const lastActiveVariantIdRef = useRef(activeVariantId);
+
+  useEffect(() => {
+    if (lastActiveVariantIdRef.current !== activeVariantId) {
+      lastActiveVariantIdRef.current = activeVariantId;
+      return;
+    }
+    setVariants(prev => prev.map(v => {
+      if (v.id === activeVariantId) {
+        return { ...v, elements, connections, brushStrokes, guides };
+      }
+      return v;
+    }));
+  }, [elements, connections, brushStrokes, guides, activeVariantId]);
+
+  useEffect(() => {
+    localStorage.setItem('js-builder-variants', JSON.stringify(variants));
+  }, [variants]);
+
+  useEffect(() => {
+    localStorage.setItem('js-builder-active-variant', activeVariantId);
+  }, [activeVariantId]);
+
+  const switchVariant = (targetId: string) => {
+    if (targetId === activeVariantId) return;
+
+    const updatedVariants = variants.map(v => {
+      if (v.id === activeVariantId) {
+        return { ...v, elements, connections, brushStrokes, guides };
+      }
+      return v;
+    });
+
+    const targetVariant = updatedVariants.find(v => v.id === targetId);
+    if (targetVariant) {
+      setActiveVariantIdState(targetId);
+      setVariants(updatedVariants);
+
+      setElements(targetVariant.elements);
+      setConnections(targetVariant.connections);
+      setBrushStrokes(targetVariant.brushStrokes);
+      setGuides(targetVariant.guides);
+
+      setSelectedIds([]);
+      setSelectedConnectionId(null);
+      setHistory([]);
+      setRedoStack([]);
+    }
+  };
+
+  const addVariant = () => {
+    if (variants.length >= 5) return;
+    saveHistory();
+    const newId = uuidv4();
+    const newVariant: Variant = {
+      id: newId,
+      name: `Variant ${variants.length + 1}`,
+      elements: [],
+      connections: [],
+      brushStrokes: [],
+      guides: []
+    };
+    
+    const updatedVariants = variants.map(v => {
+      if (v.id === activeVariantId) {
+        return { ...v, elements, connections, brushStrokes, guides };
+      }
+      return v;
+    });
+
+    const nextVariants = [...updatedVariants, newVariant];
+    setVariants(nextVariants);
+    setActiveVariantIdState(newId);
+    setElements([]);
+    setConnections([]);
+    setBrushStrokes([]);
+    setGuides([]);
+    setSelectedIds([]);
+    setSelectedConnectionId(null);
+    setHistory([]);
+    setRedoStack([]);
+  };
+
+  const deleteVariant = (id: string) => {
+    if (variants.length <= 1) return;
+    saveHistory();
+    const index = variants.findIndex(v => v.id === id);
+    const updatedVariants = variants.filter(v => v.id !== id);
+    
+    if (activeVariantId === id) {
+      const nextActiveIndex = index === 0 ? 0 : index - 1;
+      const targetVariant = updatedVariants[nextActiveIndex];
+      setActiveVariantIdState(targetVariant.id);
+      setVariants(updatedVariants);
+      setElements(targetVariant.elements);
+      setConnections(targetVariant.connections);
+      setBrushStrokes(targetVariant.brushStrokes);
+      setGuides(targetVariant.guides);
+      setSelectedIds([]);
+      setSelectedConnectionId(null);
+      setHistory([]);
+      setRedoStack([]);
+    } else {
+      setVariants(updatedVariants);
+    }
+  };
+
+  const renameVariant = (id: string, name: string) => {
+    setVariants(prev => prev.map(v => v.id === id ? { ...v, name } : v));
+  };
+
+  const importHTML = (htmlText: string): boolean => {
+    try {
+      const match = htmlText.match(/<script id="js-builder-state" type="application\/json">([\s\S]*?)<\/script>/);
+      if (!match || !match[1]) {
+        return false;
+      }
+      const state = JSON.parse(match[1]);
+      if (state.variants && state.activeVariantId) {
+        saveHistory();
+        setVariants(state.variants);
+        setActiveVariantIdState(state.activeVariantId);
+        
+        const active = state.variants.find((v: any) => v.id === state.activeVariantId);
+        if (active) {
+          setElements(active.elements || []);
+          setConnections(active.connections || []);
+          setBrushStrokes(active.brushStrokes || []);
+          setGuides(active.guides || []);
+        }
+        if (state.theme) {
+          setThemeState(state.theme);
+        }
+        setSelectedIds([]);
+        setSelectedConnectionId(null);
+        setHistory([]);
+        setRedoStack([]);
+        return true;
+      } else if (state.elements) {
+        saveHistory();
+        const fallbackVariant: Variant = {
+          id: 'default',
+          name: 'Variant 1',
+          elements: state.elements || [],
+          connections: state.connections || [],
+          brushStrokes: state.brushStrokes || [],
+          guides: state.guides || []
+        };
+        setVariants([fallbackVariant]);
+        setActiveVariantIdState('default');
+        setElements(fallbackVariant.elements);
+        setConnections(fallbackVariant.connections);
+        setBrushStrokes(fallbackVariant.brushStrokes);
+        setGuides(fallbackVariant.guides);
+        if (state.theme) {
+          setThemeState(state.theme);
+        }
+        setSelectedIds([]);
+        setSelectedConnectionId(null);
+        setHistory([]);
+        setRedoStack([]);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to import HTML state", e);
+      return false;
+    }
+  };
 
   const addElement = (type: ElementType, pos?: { x: number, y: number }, additionalProps?: Partial<CanvasElement>) => {
     saveHistory();
@@ -567,9 +843,57 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const addBrushStroke = (stroke: BrushStroke) => { saveHistory(); setBrushStrokes(prev => [...prev, stroke]); };
   const clearBrush = () => { saveHistory(); setBrushStrokes([]); };
-  const setBrushMode = (enabled: boolean) => setIsBrushMode(enabled);
+  const setBrushMode = (enabled: boolean) => {
+    setIsBrushMode(enabled);
+    if (enabled) {
+      setSelectedIds([]);
+      setSelectedConnectionId(null);
+    }
+  };
   const setBrushColor = (color: string) => setBrushColorVal(color);
   const setBrushWidth = (width: number) => setBrushWidthVal(width);
+  const eraseBrushStrokesAt = useCallback((currentPos: { x: number; y: number }, lastPos: { x: number; y: number } | null, radius: number) => {
+    setBrushStrokes(prevStrokes => {
+      let changed = false;
+      const newStrokes: BrushStroke[] = [];
+      for (const stroke of prevStrokes) {
+        let currentPoints: { x: number; y: number }[] = [];
+        for (const p of stroke.points) {
+          const dist = lastPos 
+            ? getDistanceToSegment(p, lastPos, currentPos)
+            : Math.hypot(p.x - currentPos.x, p.y - currentPos.y);
+          
+          const threshold = radius + stroke.width / 2;
+          if (dist <= threshold) {
+            if (currentPoints.length > 1) {
+              newStrokes.push({
+                id: uuidv4(),
+                points: currentPoints,
+                color: stroke.color,
+                width: stroke.width
+              });
+            }
+            currentPoints = [];
+            changed = true;
+          } else {
+            currentPoints.push(p);
+          }
+        }
+        if (currentPoints.length > 1) {
+          newStrokes.push({
+            id: stroke.id,
+            points: currentPoints,
+            color: stroke.color,
+            width: stroke.width
+          });
+        }
+      }
+      if (changed) {
+        return newStrokes;
+      }
+      return prevStrokes;
+    });
+  }, []);
 
   const exportHTML = () => {
     const sanitizeHTML = (html: string | undefined): string => {
@@ -725,7 +1049,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const childrenHTML = children.map(child => buildElementHTML(child, true)).join('\n');
         const safeTitle = escapeHtml(el.title || '');
         const titleColor = `color: ${getAdaptedTextColor(el.color)};`;
-        return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} is-node ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} overflow: visible; cursor: grab;"><div style="width: 100%; height: 100%; background-color: ${getAdaptedBgColor('node', el.backgroundColor)}; font-family: ${el.fontFamily}; border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.3s; ${innerVisibilityStyle}"><div style="padding: 12px 16px; background-color: var(--panel-header-bg); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--border-color); pointer-events: none; ${titleColor}">${safeTitle}</div><div style="position: relative; flex: 1; padding: 16px; pointer-events: none; overflow: hidden;">${childrenHTML}</div></div>${expandBtnHTML}</div>`;
+        return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} is-node ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} overflow: visible; cursor: grab;"><div style="width: 100%; height: 100%; background-color: ${getAdaptedBgColor('node', el.backgroundColor)}; font-family: ${el.fontFamily}; border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.3s; ${innerVisibilityStyle}"><div style="padding: 12px 16px; background-color: var(--panel-header-bg); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--border-color); pointer-events: none; ${titleColor}">${safeTitle}</div><div style="position: relative; flex: 1; padding: 16px; overflow: hidden;">${childrenHTML}</div></div>${expandBtnHTML}</div>`;
       }
       let innerContent = '';
       switch (el.type) {
@@ -742,26 +1066,26 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           
           if (action === 'alert') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="showNotification('${safeTarget}')"`;
+            onClickAttr = `onclick="event.stopPropagation(); showNotification('${safeTarget}')"`;
           } else if (action === 'link') {
             const safeLink = escapeHtml(el.link);
-            onClickAttr = `href="${safeLink}" target="_blank" rel="noopener noreferrer"`;
+            onClickAttr = `href="${safeLink}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();"`;
           } else if (action === 'toggleDisabled') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="toggleDisabled('${safeTarget}')"`;
+            onClickAttr = `onclick="event.stopPropagation(); toggleDisabled('${safeTarget}')"`;
           } else if (action === 'toggleVisibility') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="toggleVisibility('${safeTarget}')"`;
+            onClickAttr = `onclick="event.stopPropagation(); toggleVisibility('${safeTarget}')"`;
           } else if (action === 'triggerFlow') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="triggerFlow('${safeTarget}')"`;
+            onClickAttr = `onclick="event.stopPropagation(); triggerFlow('${safeTarget}')"`;
           } else if (action === 'nextSlide') {
-            onClickAttr = `onclick="nextSlide()"`;
+            onClickAttr = `onclick="event.stopPropagation(); nextSlide()"`;
           } else if (action === 'prevSlide') {
-            onClickAttr = `onclick="prevSlide()"`;
+            onClickAttr = `onclick="event.stopPropagation(); prevSlide()"`;
           } else if (action === 'goToSlide') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="goToSlideById('${safeTarget}')"`;
+            onClickAttr = `onclick="event.stopPropagation(); goToSlideById('${safeTarget}')"`;
           }
           
           const tag = action === 'link' ? 'a' : 'button';
@@ -1425,7 +1749,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               el.style.zIndex = 2000;
               e.stopPropagation();
             }
-          }, true);
+          }, false);
 
           window.addEventListener('pointermove', e => {
             if (isPanning) { pan.x = startPan.px + (e.clientX - startPan.x); pan.y = startPan.py + (e.clientY - startPan.y); updateTransform(); return; }
@@ -1492,8 +1816,51 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           updateTransform(); updateConnections();
         })();
       </script>
+      <script id="js-builder-state" type="application/json">${JSON.stringify({
+        variants: variants.map(v => v.id === activeVariantId ? { ...v, elements, connections, brushStrokes, guides } : v),
+        activeVariantId,
+        theme
+      })}</script>
     `;
   };
+
+  const [dialogConfig, setDialogConfig] = useState<{
+    isOpen: boolean;
+    type: 'alert' | 'confirm';
+    title: string;
+    message: string;
+    resolve: ((val: boolean) => void) | null;
+  }>({
+    isOpen: false,
+    type: 'alert',
+    title: '',
+    message: '',
+    resolve: null
+  });
+
+  const showAlert = useCallback((message: string, title: string = 'Notification'): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      setDialogConfig({
+        isOpen: true,
+        type: 'alert',
+        title,
+        message,
+        resolve: () => resolve()
+      });
+    });
+  }, []);
+
+  const showConfirm = useCallback((message: string, title: string = 'Confirmation'): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      setDialogConfig({
+        isOpen: true,
+        type: 'confirm',
+        title,
+        message,
+        resolve: (val: boolean) => resolve(val)
+      });
+    });
+  }, []);
 
   return (
     <BuilderContext.Provider value={{ 
@@ -1502,12 +1869,54 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       setConnectingNode, addConnection, removeConnection, duplicateSelected, 
       setScale, setPan, exportHTML, alignElements, distributeElements, isPresenting, setIsPresenting, editingFocalPointId, setEditingFocalPointId,
       brushStrokes, isBrushMode, brushColor, brushWidth, setBrushMode, setBrushColor, setBrushWidth, addBrushStroke, clearBrush, undo, redo, saveHistory,
+      brushTool, setBrushTool, eraseBrushStrokesAt,
       theme, setTheme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, setIsSnapEnabled: handleSetIsSnapEnabled,
       isBlurEnabled, setIsBlurEnabled: handleSetIsBlurEnabled,
       currentSlideIndex, setCurrentSlideIndex, revealDownstream,
-      isHelpOpen, setIsHelpOpen
+      isHelpOpen, setIsHelpOpen,
+      variants, activeVariantId, switchVariant, addVariant, deleteVariant, renameVariant, importHTML,
+      showAlert, showConfirm
     }}>
       {children}
+      {dialogConfig.isOpen && (
+        <div className="custom-dialog-overlay" onClick={() => {
+          if (dialogConfig.type === 'alert') {
+            dialogConfig.resolve?.(true);
+            setDialogConfig(prev => ({ ...prev, isOpen: false }));
+          }
+        }}>
+          <div className="custom-dialog-container" onClick={e => e.stopPropagation()}>
+            <div className="custom-dialog-header">
+              <span className="custom-dialog-title">{dialogConfig.title}</span>
+            </div>
+            <div className="custom-dialog-body">
+              <p className="custom-dialog-message" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{dialogConfig.message}</p>
+            </div>
+            <div className="custom-dialog-footer">
+              {dialogConfig.type === 'confirm' && (
+                <button 
+                  className="custom-dialog-btn secondary" 
+                  onClick={() => {
+                    dialogConfig.resolve?.(false);
+                    setDialogConfig(prev => ({ ...prev, isOpen: false }));
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+              <button 
+                className="custom-dialog-btn primary" 
+                onClick={() => {
+                  dialogConfig.resolve?.(true);
+                  setDialogConfig(prev => ({ ...prev, isOpen: false }));
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </BuilderContext.Provider>
   );
 };
