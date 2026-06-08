@@ -36,6 +36,27 @@ const debounce = <T extends (...args: any[]) => void>(fn: T, delay: number): T =
   }) as T;
 };
 
+export const getAdaptedTextColor = (color: string | undefined): string => {
+  if (!color || color === '#e0e0e0' || color === 'var(--text-primary)') {
+    return 'var(--text-primary)';
+  }
+  return color;
+};
+
+export const getAdaptedBorderColor = (color: string | undefined): string => {
+  if (!color || color === '#3a3c50' || color === 'var(--border-color)') {
+    return 'var(--border-color)';
+  }
+  return color;
+};
+
+export const getAdaptedBgColor = (type: string, color: string | undefined): string => {
+  if (type === 'node' && (!color || color === '#242533' || color === 'var(--bg-node)')) {
+    return 'var(--bg-node)';
+  }
+  return color || 'transparent';
+};
+
 interface ConnectingState {
   id: string;
   port: PortPosition;
@@ -59,8 +80,19 @@ interface BuilderContextType {
   isBrushMode: boolean;
   brushColor: string;
   brushWidth: number;
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
+  guides: { id: string; type: 'horizontal' | 'vertical'; position: number }[];
+  addGuide: (type: 'horizontal' | 'vertical', position: number, id?: string) => void;
+  updateGuide: (id: string, position: number) => void;
+  removeGuide: (id: string) => void;
+  copySelected: () => void;
+  pasteCopied: () => void;
+  selectAll: () => void;
+  isSnapEnabled: boolean;
+  setIsSnapEnabled: (enabled: boolean) => void;
   
-  addElement: (type: ElementType, pos?: { x: number, y: number }) => void;
+  addElement: (type: ElementType, pos?: { x: number, y: number }, additionalProps?: Partial<CanvasElement>) => void;
   updateElement: (id: string, updates: Partial<CanvasElement>) => void;
   updateConnection: (id: string, updates: Partial<Connection>) => void;
   removeElement: (id: string) => void;
@@ -93,6 +125,46 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [connections, setConnections] = useState<Connection[]>(() => safeParse('js-builder-connections', []));
   const [brushStrokes, setBrushStrokes] = useState<BrushStroke[]>(() => safeParse('js-builder-brush', []));
 
+  const [theme, setThemeState] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('js-builder-theme');
+    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
+  });
+  const [guides, setGuides] = useState<{ id: string; type: 'horizontal' | 'vertical'; position: number }[]>(() => safeParse('js-builder-guides', []));
+  const [copiedElements, setCopiedElements] = useState<CanvasElement[]>([]);
+  const [isSnapEnabled, setIsSnapEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('js-builder-snap');
+    return saved !== 'false';
+  });
+
+  const setTheme = (t: 'light' | 'dark') => {
+    setThemeState(t);
+    localStorage.setItem('js-builder-theme', t);
+  };
+
+  const addGuide = (type: 'horizontal' | 'vertical', position: number, id?: string) => {
+    setGuides(prev => {
+      const next = [...prev, { id: id || uuidv4(), type, position }];
+      localStorage.setItem('js-builder-guides', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const updateGuide = (id: string, position: number) => {
+    setGuides(prev => {
+      const next = prev.map(g => g.id === id ? { ...g, position } : g);
+      localStorage.setItem('js-builder-guides', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const removeGuide = (id: string) => {
+    setGuides(prev => {
+      const next = prev.filter(g => g.id !== id);
+      localStorage.setItem('js-builder-guides', JSON.stringify(next));
+      return next;
+    });
+  };
+
   const [_history, setHistory] = useState<HistoryState[]>([]);
   const [_redoStack, setRedoStack] = useState<HistoryState[]>([]);
 
@@ -124,6 +196,56 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     setHistory(prev => [...prev.slice(-49), snapshot]);
     setRedoStack([]);
   }, []);
+
+  const copySelected = useCallback(() => {
+    const selected = elementsRef.current.filter(el => selectedIds.includes(el.id));
+    if (selected.length > 0) {
+      setCopiedElements(structuredClone(selected));
+    }
+  }, [selectedIds]);
+
+  const pasteCopied = useCallback(() => {
+    if (copiedElements.length === 0) return;
+    saveHistory();
+    const idMap = new Map<string, string>();
+    copiedElements.forEach(el => {
+      idMap.set(el.id, uuidv4());
+    });
+    
+    const pasted: CanvasElement[] = copiedElements.map(el => {
+      const newId = idMap.get(el.id)!;
+      let newParentId = el.parentId;
+      if (el.parentId && idMap.has(el.parentId)) {
+        newParentId = idMap.get(el.parentId)!;
+      } else if (el.parentId) {
+        newParentId = null;
+      }
+      
+      const offsetX = newParentId ? 0 : 20;
+      const offsetY = newParentId ? 0 : 20;
+      
+      return {
+        ...el,
+        id: newId,
+        parentId: newParentId,
+        x: el.x + offsetX,
+        y: el.y + offsetY
+      } as CanvasElement;
+    });
+    
+    setElements(prev => [...prev, ...pasted]);
+    setSelectedIds(pasted.map(p => p.id));
+  }, [copiedElements, saveHistory]);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(elementsRef.current.map(el => el.id));
+    setSelectedConnectionId(null);
+  }, []);
+
+  const handleSetIsSnapEnabled = (val: boolean) => {
+    setIsSnapEnabled(val);
+    localStorage.setItem('js-builder-snap', String(val));
+  };
 
   const undo = useCallback(() => {
     setHistory(prevHistory => {
@@ -178,7 +300,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => { debouncedSaveConnections(connections); }, [connections, debouncedSaveConnections]);
   useEffect(() => { debouncedSaveBrush(brushStrokes); }, [brushStrokes, debouncedSaveBrush]);
 
-  const addElement = (type: ElementType, pos?: { x: number, y: number }) => {
+  const addElement = (type: ElementType, pos?: { x: number, y: number }, additionalProps?: Partial<CanvasElement>) => {
     saveHistory();
     const id = uuidv4();
     const x = pos ? pos.x : window.innerWidth / 2 - 100 + (elements.length * 10);
@@ -186,12 +308,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     const baseProps = { id, type, x, y, width: 220, height: 250, title: `Node ${elements.length + 1}`, rotation: 0, parentId: null };
     let newElement: CanvasElement;
     switch (type) {
-      case 'node': newElement = { ...baseProps, type: 'node', backgroundColor: '#242533', title: `Node ${elements.length + 1}`, fontFamily: "'Google Sans Text'" }; break;
-      case 'text': newElement = { ...baseProps, width: 150, height: 60, type: 'text', text: 'Workflow Text', fontSize: 16, color: '#e0e0e0', fontFamily: "'Google Sans Text'", borderWidth: 1, borderColor: '#3a3c50', borderRadius: 4, backgroundColor: 'transparent' }; break;
-      case 'button': newElement = { ...baseProps, width: 120, height: 40, type: 'button', text: 'Action', link: '#', backgroundColor: '#4caf50', color: '#ffffff', borderRadius: 6, actionType: 'alert', actionTarget: 'Button clicked!', fontFamily: "'Google Sans Text'" }; break;
-      case 'image': newElement = { ...baseProps, width: 150, height: 150, type: 'image', src: 'https://images.unsplash.com/photo-1531297172867-4f40136225a4?auto=format&fit=crop&w=300&q=80', alt: 'Placeholder', objectFit: 'cover', borderWidth: 0, borderColor: '#4caf50', borderRadius: 4 }; break;
-      case 'video': newElement = { ...baseProps, width: 280, height: 157, type: 'video', src: '', borderWidth: 0, borderColor: '#4caf50', borderRadius: 8 }; break;
-      case 'shape': newElement = { ...baseProps, width: 100, height: 100, type: 'shape', shapeType: 'rectangle', backgroundColor: 'transparent', borderColor: '#4caf50', borderWidth: 2, borderRadius: 8 }; break;
+      case 'node': newElement = { ...baseProps, type: 'node', backgroundColor: 'var(--bg-node)', title: `Node ${elements.length + 1}`, fontFamily: "'Google Sans Text'", ...additionalProps }; break;
+      case 'text': newElement = { ...baseProps, width: 150, height: 60, type: 'text', text: 'Workflow Text', fontSize: 16, color: 'var(--text-primary)', fontFamily: "'Google Sans Text'", borderWidth: 1, borderColor: 'var(--border-color)', borderRadius: 4, backgroundColor: 'transparent', ...additionalProps }; break;
+      case 'button': newElement = { ...baseProps, width: 120, height: 40, type: 'button', text: 'Action', link: '#', backgroundColor: '#4caf50', color: '#ffffff', borderRadius: 6, actionType: 'alert', actionTarget: 'Button clicked!', fontFamily: "'Google Sans Text'", ...additionalProps }; break;
+      case 'image': newElement = { ...baseProps, width: 150, height: 150, type: 'image', src: 'https://images.unsplash.com/photo-1531297172867-4f40136225a4?auto=format&fit=crop&w=300&q=80', alt: 'Placeholder', objectFit: 'cover', borderWidth: 0, borderColor: '#4caf50', borderRadius: 4, ...additionalProps }; break;
+      case 'video': newElement = { ...baseProps, width: 280, height: 157, type: 'video', src: '', borderWidth: 0, borderColor: '#4caf50', borderRadius: 8, ...additionalProps }; break;
+      case 'shape': newElement = { ...baseProps, width: 100, height: 100, type: 'shape', shapeType: 'rectangle', backgroundColor: 'transparent', borderColor: '#4caf50', borderWidth: 2, borderRadius: 8, color: 'var(--text-primary)', ...additionalProps }; break;
       default: return;
     }
     setElements([...elements, newElement as CanvasElement]); setSelectedIds([id]); setSelectedConnectionId(null);
@@ -324,6 +446,21 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
     }
 
+    const SHAPE_POLYGONS = {
+      triangle: "50,0 100,100 0,100",
+      rightTriangle: "0,0 100,100 0,100",
+      diamond: "50,0 100,50 50,100 0,50",
+      pentagon: "50,0 100,38 82,100 18,100 0,38",
+      hexagon: "50,0 100,25 100,75 50,100 0,75 0,25",
+      parallelogram: "25,0 100,0 75,100 0,100",
+      trapezoid: "20,0 80,0 100,100 0,100",
+      star: "50,0 63,38 100,38 69,59 82,100 50,75 18,100 31,59 0,38 37,38",
+      arrowRight: "0,30 60,30 60,10 100,50 60,90 60,70 0,70",
+      arrowLeft: "100,30 40,30 40,10 0,50 40,90 40,70 100,70",
+      arrowUp: "30,100 30,40 10,40 50,0 90,40 70,40 70,100",
+      arrowDown: "30,0 30,60 10,60 50,100 90,60 70,60 70,0"
+    };
+
     const buildElementHTML = (el: CanvasElement, isChild: boolean = false): string => {
       const elAny = el as any;
       const isFillParent = isChild && elAny.fillParent;
@@ -340,8 +477,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       const innerVisibilityStyle = el.isHidden ? 'opacity: 0; pointer-events: none;' : '';
 
       const baseStyle = isFillParent 
-        ? `position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: #e0e0e0; z-index: ${el.type === 'node' ? 1 : 2}; transition: opacity 0.4s ease; ${visibilityStyle}`
-        : `position: absolute; left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; color: #e0e0e0; transform: rotate(${el.rotation}deg); transform-origin: center center; z-index: ${el.type === 'node' ? 1 : 2}; transition: opacity 0.4s ease; ${visibilityStyle}`;
+        ? `position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--text-primary); z-index: ${el.type === 'node' ? 1 : 2}; transition: opacity 0.4s ease; ${visibilityStyle}`
+        : `position: absolute; left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; color: var(--text-primary); transform: rotate(${el.rotation}deg); transform-origin: center center; z-index: ${el.type === 'node' ? 1 : 2}; transition: opacity 0.4s ease; ${visibilityStyle}`;
       
       let expandBtnHTML = '';
       if (el.enableExpandButton) {
@@ -376,13 +513,14 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const children = elements.filter(child => child.parentId === el.id);
         const childrenHTML = children.map(child => buildElementHTML(child, true)).join('\n');
         const safeTitle = escapeHtml(el.title || '');
-        return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} is-node ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} overflow: visible; cursor: grab;"><div style="width: 100%; height: 100%; background-color: ${el.backgroundColor}; font-family: ${el.fontFamily}; border: 1px solid #3a3c50; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.3s; ${innerVisibilityStyle}"><div style="padding: 12px 16px; background-color: #1a1b26; font-size: 14px; font-weight: 600; border-bottom: 1px solid #3a3c50; pointer-events: none;">${safeTitle}</div><div style="position: relative; flex: 1; padding: 16px; pointer-events: none; overflow: hidden;">${childrenHTML}</div></div>${expandBtnHTML}</div>`;
+        const titleColor = `color: ${getAdaptedTextColor(el.color)};`;
+        return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} is-node ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} overflow: visible; cursor: grab;"><div style="width: 100%; height: 100%; background-color: ${getAdaptedBgColor('node', el.backgroundColor)}; font-family: ${el.fontFamily}; border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.3s; ${innerVisibilityStyle}"><div style="padding: 12px 16px; background-color: var(--panel-header-bg); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--border-color); pointer-events: none; ${titleColor}">${safeTitle}</div><div style="position: relative; flex: 1; padding: 16px; pointer-events: none; overflow: hidden;">${childrenHTML}</div></div>${expandBtnHTML}</div>`;
       }
       let innerContent = '';
       switch (el.type) {
         case 'text': {
           const safeText = escapeHtml(el.text);
-          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${el.color}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${el.borderColor}; border-radius: ${el.borderRadius}px; text-align: center; display: flex; align-items: center; justify-content: center; overflow: hidden; pointer-events: none;">${safeText}</div>`;
+          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; text-align: center; display: flex; align-items: center; justify-content: center; overflow: hidden; pointer-events: none;">${safeText}</div>`;
           break;
         }
         case 'button': {
@@ -399,31 +537,37 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             onClickAttr = `href="${safeLink}" target="_blank" rel="noopener noreferrer"`;
           }
           const tag = el.actionType === 'link' ? 'a' : 'button';
-          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${el.color}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px;">${safeButtonText}</${tag}>`;
+          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${getAdaptedTextColor(el.color)}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px;">${safeButtonText}</${tag}>`;
           break;
         }
         case 'image': {
           const safeImgTitle = elAny.title ? escapeHtml(elAny.title) : '';
           const safeAlt = escapeHtml(el.alt);
-          const imgHeader = safeImgTitle ? `<div style="padding: 6px 12px; background-color: #1a1b26; border-bottom: 1px solid #3a3c50; display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: #8c8d9c; width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeImgTitle}</div>` : '';
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; border: ${el.borderWidth}px solid ${el.borderColor}; border-radius: ${el.borderRadius}px; box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
+          const imgHeader = safeImgTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeImgTitle}</div>` : '';
+          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
           break;
         }
         case 'video': {
           const safeVidTitle = elAny.title ? escapeHtml(elAny.title) : '';
           const safeSrc = escapeHtml(el.src);
-          const vidHeader = safeVidTitle ? `<div style="padding: 6px 12px; background-color: #1a1b26; border-bottom: 1px solid #3a3c50; display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: #8c8d9c; width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeVidTitle}</div>` : '';
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${vidHeader}<div style="flex: 1;"><iframe id="el-${el.id}" src="${safeSrc}" style="width: 100%; height: 100%; border: ${el.borderWidth}px solid ${el.borderColor}; border-radius: ${el.borderRadius}px; box-sizing: border-box;" frameborder="0" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe></div></div>`;
+          const vidHeader = safeVidTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeVidTitle}</div>` : '';
+          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${vidHeader}<div style="flex: 1;"><iframe id="el-${el.id}" src="${safeSrc}" style="width: 100%; height: 100%; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; box-sizing: border-box;" frameborder="0" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe></div></div>`;
           break;
         }
-        case 'shape':
-          if (el.shapeType === 'rectangle') innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${el.borderColor}; border-radius: ${el.borderRadius}px; pointer-events: none;"></div>`;
-          else if (el.shapeType === 'ellipse') innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${el.borderColor}; border-radius: 50%; pointer-events: none;"></div>`;
-          else {
-            const pts = el.shapeType === 'triangle' ? "50,0 100,100 0,100" : "50,0 100,50 50,100 0,50";
-            innerContent = `<svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none;"><polygon points="${pts}" fill="${el.backgroundColor}" stroke="${el.borderColor}" stroke-width="${el.borderWidth}" vector-effect="non-scaling-stroke" /></svg>`;
+        case 'shape': {
+          const hasText = el.text ? true : false;
+          const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: center; padding: 8px; box-sizing: border-box; pointer-events: none; overflow: hidden; white-space: pre-wrap; word-break: break-word;">${escapeHtml(el.text)}</div>` : '';
+          
+          if (el.shapeType === 'rectangle') {
+            innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; pointer-events: none;">${shapeTextHTML}</div>`;
+          } else if (el.shapeType === 'ellipse') {
+            innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: 50%; pointer-events: none;">${shapeTextHTML}</div>`;
+          } else {
+            const pts = (SHAPE_POLYGONS as any)[el.shapeType] || SHAPE_POLYGONS.triangle;
+            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none;"><polygon points="${pts}" fill="${el.backgroundColor}" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" vector-effect="non-scaling-stroke" /></svg>${shapeTextHTML}</div>`;
           }
           break;
+        }
       }
       innerContent = `<div style="width: 100%; height: 100%; transition: opacity 0.3s; ${innerVisibilityStyle}">${innerContent}</div>`;
       return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} ${el.type === 'button' ? 'is-button' : ''} ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} cursor: grab; overflow: visible;">${innerContent}${expandBtnHTML}</div>`;
@@ -449,19 +593,72 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     return `
       <style>
-        body { margin: 0; padding: 0; overflow: hidden; background: #17181f; font-family: 'Google Sans Text', sans-serif; }
+        :root {
+          --bg-canvas: #17181f;
+          --bg-panel: rgba(22, 23, 33, 0.6);
+          --bg-toolbar: #242533;
+          --bg-node: #242533;
+          --text-primary: #ffffff;
+          --text-secondary: #8c8d9c;
+          --border-color: #3a3c50;
+          --input-bg: rgba(10, 11, 16, 0.6);
+          --input-focus-bg: rgba(15, 16, 23, 0.8);
+          --grid-dot: #3a3c50;
+          --btn-bg: #3a3c50;
+          --btn-hover-bg: #4a4c62;
+          --panel-header-bg: #1a1b26;
+        }
+        body.light-theme {
+          --bg-canvas: #f8f9fa;
+          --bg-panel: rgba(255, 255, 255, 0.85);
+          --bg-toolbar: #ffffff;
+          --bg-node: #ffffff;
+          --text-primary: #1f2937;
+          --text-secondary: #4b5563;
+          --border-color: #e5e7eb;
+          --input-bg: #f9fafb;
+          --input-focus-bg: #ffffff;
+          --grid-dot: #cccccc;
+          --btn-bg: #e5e7eb;
+          --btn-hover-bg: #d1d5db;
+          --panel-header-bg: #f3f4f6;
+        }
+        body { margin: 0; padding: 0; overflow: hidden; background: var(--bg-canvas); font-family: 'Google Sans Text', sans-serif; color: var(--text-primary); transition: background 0.3s, color 0.3s; }
         .draggable-element { transition: transform 0.05s linear; }
-        .notification-toast { position: fixed; top: 24px; right: 24px; background: #242533; color: #fff; padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateX(120%); opacity: 0; border: 1px solid #4a4d68; display: flex; align-items: center; gap: 12px; }
+        .notification-toast { position: fixed; top: 24px; right: 24px; background: var(--bg-toolbar); color: var(--text-primary); padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateX(120%); opacity: 0; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
         .notification-toast.show { transform: translateX(0); opacity: 1; }
-        .zoom-controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #1c1d29; padding: 5px; padding-left: 20px; border-radius: 40px; border: 1px solid #3a3c50; display: flex; align-items: center; gap: 15px; color: #fff; z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+        .zoom-controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); padding: 5px; padding-left: 20px; border-radius: 40px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 15px; color: var(--text-primary); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
         .btn-fit { background: #3f51b5; border: none; color: white; padding: 10px 24px; border-radius: 30px; cursor: pointer; font-size: 13px; font-weight: 700; transition: all 0.2s; white-space: nowrap; box-shadow: 0 4px 12px rgba(63, 81, 181, 0.3); }
         .btn-fit:hover { background: #4c5fd7; transform: scale(1.05); }
-        .brush-toolbar { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: #242533; padding: 10px; borderRadius: 12px; border: 1px solid #3a3c50; z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-        .btn-tool { background: #3a3c50; border: none; color: #fff; width: 38px; height: 38px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .brush-toolbar { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: var(--bg-toolbar); padding: 10px; borderRadius: 12px; border: 1px solid var(--border-color); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        .btn-tool { background: var(--btn-bg); border: none; color: var(--text-primary); width: 38px; height: 38px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .btn-tool:hover { background: var(--btn-hover-bg); }
         .btn-tool svg { width: 18px; height: 18px; }
-        .btn-tool.primary { background: #4caf50; box-shadow: 0 0 12px rgba(76, 175, 80, 0.4); }
+        .btn-tool.primary { background: #4caf50; box-shadow: 0 0 12px rgba(76, 175, 80, 0.4); color: white; }
         .color-picker-btn { width: 38px; height: 38px; border: none; border-radius: 8px; padding: 0; cursor: pointer; overflow: hidden; background: none; }
         .notification-icon { background: #4caf50; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .theme-toggle-btn {
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: var(--bg-toolbar);
+          border: 1px solid var(--border-color);
+          color: var(--text-primary);
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+          z-index: 10000;
+          transition: all 0.2s;
+        }
+        .theme-toggle-btn:hover {
+          transform: scale(1.08);
+          background: var(--btn-hover-bg);
+        }
         .conn-btn-group { opacity: 1; pointer-events: auto; }
         .show-btns .conn-btn-group { opacity: 1 !important; pointer-events: auto !important; }
         .conn-btn { background: #3f51b5; color: #fff; border: 2px solid #1e1f2e; padding: 3px 8px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.5); transition: all 0.2s; white-space: nowrap; line-height: 1.2; }
@@ -482,7 +679,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         #interactive-container.brush-mode { cursor: crosshair !important; }
       </style>
       <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Display:wght@400;500;700&family=Google+Sans+Flex:wght@100..1000&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
-      <div id="interactive-container" oncontextmenu="return false;" style="position: relative; width: 100vw; height: 100vh; overflow: hidden; user-select: none; background-color: #17181f; background-image: radial-gradient(circle, #3a3c50 1px, transparent 1px);">
+      <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
+        <svg class="sun-icon" style="display:none;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      </button>
+      <div id="interactive-container" oncontextmenu="return false;" style="position: relative; width: 100vw; height: 100vh; overflow: hidden; user-select: none; background-color: var(--bg-canvas); background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);">
         <div id="interactive-content" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0;">
           <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible;">
             <defs>
@@ -508,6 +709,23 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       <div id="notification-toast" class="notification-toast"><div class="notification-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><span id="notification-text"></span></div>
       <script>
         (function() {
+          window.toggleTheme = () => {
+            const isLight = document.body.classList.toggle('light-theme');
+            localStorage.setItem('theme', isLight ? 'light' : 'dark');
+            updateThemeIcons(isLight);
+          };
+          function updateThemeIcons(isLight) {
+            document.querySelector('.sun-icon').style.display = isLight ? 'block' : 'none';
+            document.querySelector('.moon-icon').style.display = isLight ? 'none' : 'block';
+          }
+          const savedTheme = localStorage.getItem('theme') || '${theme}';
+          if (savedTheme === 'light') {
+            document.body.classList.add('light-theme');
+            updateThemeIcons(true);
+          } else {
+            updateThemeIcons(false);
+          }
+
           const container = document.getElementById('interactive-container');
           const content = document.getElementById('interactive-content');
           const brushLayer = document.getElementById('brush-layer');
@@ -787,7 +1005,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       addElement, updateElement, updateConnection, removeElement, removeSelected, selectElement, selectConnection, 
       setConnectingNode, addConnection, removeConnection, duplicateSelected, 
       setScale, setPan, exportHTML, editingFocalPointId, setEditingFocalPointId,
-      brushStrokes, isBrushMode, brushColor, brushWidth, setBrushMode, setBrushColor, setBrushWidth, addBrushStroke, clearBrush, undo, redo, saveHistory
+      brushStrokes, isBrushMode, brushColor, brushWidth, setBrushMode, setBrushColor, setBrushWidth, addBrushStroke, clearBrush, undo, redo, saveHistory,
+      theme, setTheme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, setIsSnapEnabled: handleSetIsSnapEnabled
     }}>
       {children}
     </BuilderContext.Provider>

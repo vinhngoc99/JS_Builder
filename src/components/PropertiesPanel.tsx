@@ -11,9 +11,9 @@ const Label = ({ children }: { children: React.ReactNode }) => (
 
 const Toggle = ({ label, checked, onChange, color = '#4caf50' }: { label: string; checked: boolean; onChange: (v: boolean) => void; color?: string }) => (
   <div onClick={() => onChange(!checked)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', cursor: 'pointer' }}>
-    <span style={{ fontSize: '12px', color: checked ? '#fff' : '#8c8d9c', fontWeight: checked ? 600 : 400, transition: 'color 0.2s' }}>{label}</span>
-    <div style={{ width: '32px', height: '18px', borderRadius: '9px', position: 'relative', transition: 'background 0.3s cubic-bezier(0.4, 0, 0.2, 1)', backgroundColor: checked ? color : 'rgba(255,255,255,0.1)', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.4)' }}>
-      <div style={{ width: '14px', height: '14px', borderRadius: '50%', backgroundColor: '#fff', position: 'absolute', top: '2px', left: checked ? '16px' : '2px', transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)', boxShadow: '0 2px 4px rgba(0,0,0,0.4)' }} />
+    <span style={{ fontSize: '12px', color: checked ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: checked ? 600 : 400, transition: 'color 0.2s' }}>{label}</span>
+    <div style={{ width: '32px', height: '18px', borderRadius: '9px', position: 'relative', transition: 'background 0.3s cubic-bezier(0.4, 0, 0.2, 1)', backgroundColor: checked ? color : 'rgba(128, 128, 128, 0.25)', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.2)' }}>
+      <div style={{ width: '14px', height: '14px', borderRadius: '50%', backgroundColor: '#fff', position: 'absolute', top: '2px', left: checked ? '16px' : '2px', transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }} />
     </div>
   </div>
 );
@@ -21,7 +21,7 @@ const Toggle = ({ label, checked, onChange, color = '#4caf50' }: { label: string
 
 
 export const PropertiesPanel: React.FC = () => {
-  const { elements, selectedIds, updateElement, removeElement, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection } = useBuilder();
+  const { elements, selectedIds, updateElement, removeElement, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled } = useBuilder();
   
   const lastSelectedId = selectedIds[selectedIds.length - 1];
   const selectedElement = elements.find(el => el.id === lastSelectedId);
@@ -82,10 +82,17 @@ export const PropertiesPanel: React.FC = () => {
   if (!selectedElement && !selectedConnectionId) {
     return (
       <div className="properties-panel">
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <p style={{ color: '#444', fontSize: '12px' }}>Select an element</p>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', padding: '10px 0' }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Global Settings</div>
+          <Divider />
+          <Toggle label="Light Theme" checked={theme === 'light'} onChange={(v) => setTheme(v ? 'light' : 'dark')} color="#4caf50" />
+          <Toggle label="Enable Snapping" checked={isSnapEnabled} onChange={(v) => setIsSnapEnabled(v)} color="#4caf50" />
+          <Divider />
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Select an element to view properties</p>
+          </div>
         </div>
-        <button onClick={handleGenerate} className="btn primary" style={{ width: '100%', padding: '10px' }}>Export</button>
+        <button onClick={handleGenerate} className="btn primary" style={{ width: '100%', padding: '10px' }}>Export HTML</button>
         {renderExportModal()}
       </div>
     );
@@ -97,7 +104,7 @@ export const PropertiesPanel: React.FC = () => {
     if (!sc) return null;
     return (
       <div className="properties-panel">
-        <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', marginBottom: '12px' }}>Connection</div>
+        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '12px' }}>Connection</div>
         <Label>Label</Label>
         <input type="text" value={sc.label || ''} onChange={(e) => updateConnection(sc.id, { label: e.target.value })} placeholder="Label..." />
         <Label>Alignment</Label>
@@ -110,7 +117,7 @@ export const PropertiesPanel: React.FC = () => {
         </div>
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <button onClick={() => removeConnection(sc.id)} style={{ width: '100%', padding: '8px', background: 'none', border: '1px solid #ef5350', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}>Delete</button>
-          <button onClick={handleGenerate} className="btn primary" style={{ width: '100%', padding: '10px' }}>Export</button>
+          <button onClick={handleGenerate} className="btn primary" style={{ width: '100%', padding: '10px' }}>Export HTML</button>
         </div>
         {renderExportModal()}
       </div>
@@ -154,15 +161,15 @@ export const PropertiesPanel: React.FC = () => {
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '4px' }}>
-        <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{el.type.charAt(0).toUpperCase() + el.type.slice(1)}</span>
-        <span style={{ fontSize: '9px', color: '#444', fontFamily: 'monospace' }}>{el.id.substring(0, 8)}</span>
+        <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{el.type.charAt(0).toUpperCase() + el.type.slice(1)}</span>
+        <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{el.id.substring(0, 8)}</span>
       </div>
 
       <Divider />
 
       {/* Flags */}
       <Label>Properties</Label>
-      <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '6px 14px', border: '1px solid rgba(255,255,255,0.05)', marginBottom: '8px' }}>
+      <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '6px 14px', border: '1px solid var(--border-color)', marginBottom: '8px' }}>
         {el.parentId && <Toggle label="Fill Parent" checked={!!el.fillParent} onChange={(v) => handleToggle('fillParent', v)} />}
         <Toggle label="Disabled" checked={!!el.isDisabled} onChange={(v) => handleToggle('isDisabled', v)} color="#ef5350" />
         <Toggle label="Hidden" checked={!!el.isHidden} onChange={(v) => handleToggle('isHidden', v)} color="#ff9800" />
@@ -178,10 +185,10 @@ export const PropertiesPanel: React.FC = () => {
         <input type="text" name="title" value={el.title || ''} onChange={handleChange} placeholder="Title..." style={{ marginBottom: '6px' }} />
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', marginTop: '8px' }}>
-        <div><div style={{ fontSize: '10px', color: '#8c8d9c', marginBottom: '4px', fontWeight: 600 }}>X</div><input type="number" name="x" value={Math.round(el.x)} onChange={handleChange} disabled={!!el.fillParent} /></div>
-        <div><div style={{ fontSize: '10px', color: '#8c8d9c', marginBottom: '4px', fontWeight: 600 }}>Y</div><input type="number" name="y" value={Math.round(el.y)} onChange={handleChange} disabled={!!el.fillParent} /></div>
-        <div><div style={{ fontSize: '10px', color: '#8c8d9c', marginBottom: '4px', fontWeight: 600 }}>W</div><input type="number" name="width" value={Math.round(el.width)} onChange={handleChange} disabled={!!el.fillParent} min={10} /></div>
-        <div><div style={{ fontSize: '10px', color: '#8c8d9c', marginBottom: '4px', fontWeight: 600 }}>H</div><input type="number" name="height" value={Math.round(el.height)} onChange={handleChange} disabled={!!el.fillParent} min={10} /></div>
+        <div><div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>X</div><input type="number" name="x" value={Math.round(el.x)} onChange={handleChange} disabled={!!el.fillParent} /></div>
+        <div><div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>Y</div><input type="number" name="y" value={Math.round(el.y)} onChange={handleChange} disabled={!!el.fillParent} /></div>
+        <div><div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>W</div><input type="number" name="width" value={Math.round(el.width)} onChange={handleChange} disabled={!!el.fillParent} min={10} /></div>
+        <div><div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>H</div><input type="number" name="height" value={Math.round(el.height)} onChange={handleChange} disabled={!!el.fillParent} min={10} /></div>
       </div>
 
       <Divider />
@@ -221,8 +228,12 @@ export const PropertiesPanel: React.FC = () => {
           <><Label>Target</Label><select name="actionTarget" value={el.actionTarget} onChange={handleChange}><option value="">—</option>{elements.filter(x => x.id !== el.id).map(x => <option key={x.id} value={x.id}>{x.type}: {x.title || (x as any).text || x.id.substring(0,6)}</option>)}</select></>
         ) : (<><Label>Message</Label><input type="text" name="actionTarget" value={el.actionTarget} onChange={handleChange} /></>)}
         <div style={{ marginTop: '12px' }}>
+          <CustomColorPicker label="Text" name="color" value={el.color || '#ffffff'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
           <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
-          <CustomColorPicker label="Line" name="borderColor" value={el.borderColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { borderColor: 'transparent' })} />
+          <CustomColorPicker label="Line" name="borderColor" value={el.borderColor || 'transparent'} onChange={handleChange} onTransparent={() => updateElement(el.id, { borderColor: 'transparent' })} />
+        </div>
+        <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+          <div style={{ flex: 1 }}><Label>Radius</Label><input type="number" name="borderRadius" value={el.borderRadius || 0} onChange={handleChange} min={0} /></div>
         </div>
       </>)}
 
@@ -245,18 +256,54 @@ export const PropertiesPanel: React.FC = () => {
           <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
           <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 14} onChange={handleChange} /></div>
         </div>
-        <div style={{ marginTop: '12px' }}><CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} /></div>
+        <div style={{ marginTop: '12px' }}>
+          <CustomColorPicker label="Text" name="color" value={el.color || '#ffffff'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
+          <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
+        </div>
       </>)}
 
       {el.type === 'shape' && (<>
+        <Label>Shape Type</Label>
+        <select name="shapeType" value={el.shapeType} onChange={handleChange}>
+          <option value="rectangle">Rectangle</option>
+          <option value="ellipse">Circle / Ellipse</option>
+          <option value="triangle">Triangle</option>
+          <option value="rightTriangle">Right Triangle</option>
+          <option value="diamond">Diamond</option>
+          <option value="pentagon">Pentagon</option>
+          <option value="hexagon">Hexagon</option>
+          <option value="star">Star</option>
+          <option value="parallelogram">Parallelogram</option>
+          <option value="trapezoid">Trapezoid</option>
+          <option value="arrowRight">Arrow Right</option>
+          <option value="arrowLeft">Arrow Left</option>
+          <option value="arrowUp">Arrow Up</option>
+          <option value="arrowDown">Arrow Down</option>
+        </select>
+        
+        <Label>Text Inside Shape</Label>
+        <input type="text" name="text" value={el.text || ''} onChange={handleChange} placeholder="Type inside shape..." />
+
+        <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+          <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
+          <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 14} onChange={handleChange} /></div>
+        </div>
+
         <div style={{ marginTop: '12px' }}>
+          <CustomColorPicker label="Text" name="color" value={el.color || '#e0e0e0'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
           <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
+          <CustomColorPicker label="Line" name="borderColor" value={el.borderColor || 'transparent'} onChange={handleChange} onTransparent={() => updateElement(el.id, { borderColor: 'transparent' })} />
+        </div>
+
+        <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+          <div style={{ flex: 1 }}><Label>Border W</Label><input type="number" name="borderWidth" value={el.borderWidth || 0} onChange={handleChange} min={0} /></div>
+          <div style={{ flex: 1 }}><Label>Radius</Label><input type="number" name="borderRadius" value={el.borderRadius || 0} onChange={handleChange} min={0} /></div>
         </div>
       </>)}
 
       {/* Actions */}
       <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', gap: '6px' }}>
-        <button onClick={() => removeElement(el.id)} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid #3a3c50', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Delete</button>
+        <button onClick={() => removeElement(el.id)} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Delete</button>
         <button onClick={() => { setHtmlCode(exportHTML()); setPreviewMode(true); setModalOpen(true); }} style={{ flex: 1, padding: '8px', background: '#3f51b5', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Preview</button>
         <button onClick={handleGenerate} style={{ flex: 1, padding: '8px', background: '#4caf50', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Export</button>
       </div>

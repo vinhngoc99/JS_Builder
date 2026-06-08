@@ -22,6 +22,7 @@ export interface NodeElement extends BaseElement {
   backgroundColor: string;
   fontFamily: string;
   fontSize?: number;
+  color?: string;
 }
 
 export interface TextElement extends BaseElement {
@@ -72,12 +73,15 @@ export interface VideoElement extends BaseElement {
 
 export interface ShapeElement extends BaseElement {
   type: 'shape';
-  shapeType: 'rectangle' | 'ellipse' | 'triangle' | 'polygon';
+  shapeType: 'rectangle' | 'ellipse' | 'triangle' | 'rightTriangle' | 'diamond' | 'pentagon' | 'hexagon' | 'star' | 'parallelogram' | 'trapezoid' | 'arrowRight' | 'arrowLeft' | 'arrowUp' | 'arrowDown';
   backgroundColor: string;
   borderWidth: number;
   borderColor: string;
   borderRadius: number;
   fontSize?: number;
+  text?: string;
+  color?: string;
+  fontFamily?: string;
 }
 
 export type CanvasElement = TextElement | ButtonElement | ImageElement | ShapeElement | NodeElement | VideoElement;

@@ -10,7 +10,8 @@ export const Canvas: React.FC = () => {
     selectedIds, selectedConnectionId, selectConnection, removeElement, removeConnection, 
     scale, setScale, pan, setPan, editingFocalPointId, setEditingFocalPointId, 
     addElement, removeSelected, duplicateSelected,
-    brushStrokes, isBrushMode, brushColor, brushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo
+    brushStrokes, isBrushMode, brushColor, brushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo,
+    theme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled
   } = useBuilder();
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -20,6 +21,15 @@ export const Canvas: React.FC = () => {
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
   const [currentStroke, setCurrentStroke] = useState<{ x: number, y: number }[] | null>(null);
+  
+  const [snapGuides, setSnapGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
+  const [draggedGuide, setDraggedGuide] = useState<{ id: string; type: 'horizontal' | 'vertical'; isNew: boolean } | null>(null);
+
+  // Expose snapGuides via window so ElementWrapper can update them during drag
+  useEffect(() => {
+    (window as any).setSnapGuides = setSnapGuides;
+    return () => { delete (window as any).setSnapGuides; };
+  }, []);
   
   const startPanInfo = useRef({ startX: 0, startY: 0, initialPanX: 0, initialPanY: 0 });
 
@@ -45,7 +55,7 @@ export const Canvas: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.contentEditable === 'true';
       
       if (editingFocalPointId && (e.key === 'Enter' || e.key === 'Escape')) { setEditingFocalPointId(null); return; }
       if (!isInput && e.code === 'Space') { e.preventDefault(); setIsSpaceDown(true); }
@@ -57,6 +67,11 @@ export const Canvas: React.FC = () => {
       if (e.key.toLowerCase() === 'b' && !isInput) { setBrushMode(!isBrushMode); }
       if (e.shiftKey && e.key.toLowerCase() === 'x' && !isInput) { clearBrush(); }
       
+      // Select All, Copy, Paste
+      if (e.ctrlKey && e.key === 'a' && !isInput) { e.preventDefault(); selectAll(); }
+      if (e.ctrlKey && e.key === 'c' && !isInput) { e.preventDefault(); copySelected(); }
+      if (e.ctrlKey && e.key === 'v' && !isInput) { e.preventDefault(); pasteCopied(); }
+
       // Undo / Redo
       if (e.ctrlKey && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
       if (e.ctrlKey && e.shiftKey && e.key === 'Z' && !isInput) { e.preventDefault(); redo(); } // some browsers
@@ -66,7 +81,7 @@ export const Canvas: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo]);
+  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied]);
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -110,6 +125,17 @@ export const Canvas: React.FC = () => {
 
   const handlePointerMove = useCallback((e: PointerEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
+    if (draggedGuide) {
+      if (draggedGuide.type === 'horizontal') {
+        const canvasY = (e.clientY - rect.top - pan.y) / scale;
+        updateGuide(draggedGuide.id, canvasY);
+      } else {
+        const canvasX = (e.clientX - rect.left - pan.x) / scale;
+        updateGuide(draggedGuide.id, canvasX);
+      }
+      return;
+    }
+
     const x = (e.clientX - rect.left - pan.x) / scale, y = (e.clientY - rect.top - pan.y) / scale;
     if (currentStroke) { setCurrentStroke(prev => prev ? [...prev, { x, y }] : null); return; }
     if (isPanning) {
@@ -121,9 +147,23 @@ export const Canvas: React.FC = () => {
     }
     if (selectionBox) { setSelectionBox(prev => prev ? { ...prev, x2: x, y2: y } : null); return; }
     if (connectingNode) { setMousePos({ x, y }); }
-  }, [connectingNode, scale, pan, isPanning, setPan, currentStroke, selectionBox]);
+  }, [connectingNode, scale, pan, isPanning, setPan, currentStroke, selectionBox, draggedGuide, updateGuide]);
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: PointerEvent) => {
+    if (draggedGuide) {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const relativeX = e.clientX - rect.left;
+      const relativeY = e.clientY - rect.top;
+      
+      if (draggedGuide.type === 'horizontal' && (relativeY < 20 || relativeY > rect.height)) {
+        removeGuide(draggedGuide.id);
+      } else if (draggedGuide.type === 'vertical' && (relativeX < 20 || relativeX > rect.width)) {
+        removeGuide(draggedGuide.id);
+      }
+      setDraggedGuide(null);
+      return;
+    }
+
     if (currentStroke) { addBrushStroke({ id: uuidv4(), points: currentStroke, color: brushColor, width: brushWidth }); setCurrentStroke(null); }
     if (isPanning) setIsPanning(false);
     if (connectingNode) setConnectingNode(null);
@@ -133,12 +173,68 @@ export const Canvas: React.FC = () => {
       elements.filter(el => !el.parentId).forEach(el => { if (el.x >= xMin && el.x + el.width <= xMax && el.y >= yMin && el.y + el.height <= yMax) selectElement(el.id, true); });
       setSelectionBox(null);
     }
-  }, [currentStroke, isPanning, connectingNode, selectionBox, elements, selectElement, addBrushStroke, brushColor, brushWidth, setConnectingNode]);
+  }, [currentStroke, isPanning, connectingNode, selectionBox, elements, selectElement, addBrushStroke, brushColor, brushWidth, setConnectingNode, draggedGuide, removeGuide]);
 
   useEffect(() => {
     window.addEventListener('pointermove', handlePointerMove); window.addEventListener('pointerup', handlePointerUp);
     return () => { window.removeEventListener('pointermove', handlePointerMove); window.removeEventListener('pointerup', handlePointerUp); };
   }, [handlePointerMove, handlePointerUp]);
+
+  const [containerSize, setContainerSize] = useState({ width: 1000, height: 1000 });
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    setContainerSize({ width: rect.width, height: rect.height });
+
+    const handleResize = () => {
+      if (!canvasRef.current) return;
+      const r = canvasRef.current.getBoundingClientRect();
+      setContainerSize({ width: r.width, height: r.height });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const getRulerTicks = (size: number, panOffset: number, scale: number) => {
+    const baseIntervals = [10, 50, 100, 500, 1000];
+    let interval = 100;
+    for (const val of baseIntervals) {
+      if (val * scale >= 40) {
+        interval = val;
+        break;
+      }
+    }
+
+    const ticks = [];
+    const startValue = Math.floor(-panOffset / (interval * scale)) * interval;
+    const endValue = Math.ceil((size - panOffset) / (interval * scale)) * interval;
+
+    for (let val = startValue; val <= endValue; val += interval) {
+      const pos = panOffset + val * scale;
+      ticks.push({ value: val, pos, isMajor: val % (interval * 5) === 0 });
+    }
+    return { ticks, interval };
+  };
+
+  const handleRulerPointerDown = (e: React.PointerEvent, type: 'horizontal' | 'vertical') => {
+    e.stopPropagation();
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const id = uuidv4();
+    if (type === 'horizontal') {
+      const canvasY = (e.clientY - rect.top - pan.y) / scale;
+      addGuide('horizontal', canvasY, id);
+      setDraggedGuide({ id, type: 'horizontal', isNew: true });
+    } else {
+      const canvasX = (e.clientX - rect.left - pan.x) / scale;
+      addGuide('vertical', canvasX, id);
+      setDraggedGuide({ id, type: 'vertical', isNew: true });
+    }
+  };
+
+  const handleGuidePointerDown = (e: React.PointerEvent, id: string, type: 'horizontal' | 'vertical') => {
+    e.stopPropagation();
+    setDraggedGuide({ id, type, isNew: false });
+  };
 
   const getAbsoluteBounds = (id: string) => {
     let el = elements.find(e => e.id === id); if (!el) return null;
@@ -166,8 +262,55 @@ export const Canvas: React.FC = () => {
   while (currentGridSize < 15) currentGridSize *= 2;
   while (currentGridSize > 60) currentGridSize /= 2;
 
+  const renderHorizontalRuler = () => {
+    const { ticks } = getRulerTicks(containerSize.width - 20, pan.x - 20, scale);
+    return (
+      <svg style={{ position: 'absolute', top: 0, left: 20, width: 'calc(100% - 20px)', height: 20, background: 'var(--bg-toolbar)', borderBottom: '1px solid var(--border-color)', zIndex: 1001, userSelect: 'none', pointerEvents: 'auto', cursor: 'row-resize' }} onPointerDown={(e) => handleRulerPointerDown(e, 'horizontal')}>
+        {ticks.map((t, idx) => {
+          if (t.pos < 0) return null;
+          return (
+            <g key={`h-tick-${idx}`}>
+              <line x1={t.pos} y1={t.isMajor ? 8 : 12} x2={t.pos} y2={20} stroke="var(--text-secondary)" strokeWidth="1" />
+              {t.isMajor && (
+                <text x={t.pos + 3} y={3} fontSize="9" fill="var(--text-secondary)" textAnchor="start" dominantBaseline="hanging">
+                  {t.value}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  };
+
+  const renderVerticalRuler = () => {
+    const { ticks } = getRulerTicks(containerSize.height - 20, pan.y - 20, scale);
+    return (
+      <svg style={{ position: 'absolute', top: 20, left: 0, width: 20, height: 'calc(100% - 20px)', background: 'var(--bg-toolbar)', borderRight: '1px solid var(--border-color)', zIndex: 1001, userSelect: 'none', pointerEvents: 'auto', cursor: 'col-resize' }} onPointerDown={(e) => handleRulerPointerDown(e, 'vertical')}>
+        {ticks.map((t, idx) => {
+          if (t.pos < 0) return null;
+          return (
+            <g key={`v-tick-${idx}`}>
+              <line x1={t.isMajor ? 8 : 12} y1={t.pos} x2={20} y2={t.pos} stroke="var(--text-secondary)" strokeWidth="1" />
+              {t.isMajor && (
+                <text x={2} y={t.pos + 3} fontSize="9" fill="var(--text-secondary)" transform={`rotate(-90 2 ${t.pos + 3})`} textAnchor="end" dominantBaseline="middle">
+                  {t.value}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  };
+
   return (
     <div className="canvas-container" onContextMenu={handleContextMenu}>
+      {/* Rulers */}
+      <div style={{ position: 'absolute', top: 0, left: 0, width: 20, height: 20, background: 'var(--bg-toolbar)', borderBottom: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)', zIndex: 1002 }} />
+      {renderHorizontalRuler()}
+      {renderVerticalRuler()}
+
       <div 
         className={`canvas ${isSpaceDown ? 'space-down' : ''} ${isPanning ? 'panning' : ''} ${isBrushMode ? 'brush-cursor' : ''}`}
         ref={canvasRef}
@@ -225,6 +368,57 @@ export const Canvas: React.FC = () => {
             <ElementWrapper key={el.id} element={el} />
           ))}
 
+          {/* Custom user guidelines */}
+          {guides.map(guide => {
+            if (guide.type === 'horizontal') {
+              return (
+                <div 
+                  key={guide.id}
+                  onPointerDown={(e) => handleGuidePointerDown(e, guide.id, 'horizontal')}
+                  style={{ 
+                    position: 'absolute', 
+                    top: guide.position, 
+                    left: -10000, 
+                    right: -10000, 
+                    height: '6px', 
+                    marginTop: '-3px',
+                    borderTop: '1.5px dashed #ff5252', 
+                    cursor: 'row-resize', 
+                    zIndex: 1998, 
+                    pointerEvents: 'auto' 
+                  }} 
+                />
+              );
+            } else {
+              return (
+                <div 
+                  key={guide.id}
+                  onPointerDown={(e) => handleGuidePointerDown(e, guide.id, 'vertical')}
+                  style={{ 
+                    position: 'absolute', 
+                    left: guide.position, 
+                    top: -10000, 
+                    bottom: -10000, 
+                    width: '6px', 
+                    marginLeft: '-3px',
+                    borderLeft: '1.5px dashed #ff5252', 
+                    cursor: 'col-resize', 
+                    zIndex: 1998, 
+                    pointerEvents: 'auto' 
+                  }} 
+                />
+              );
+            }
+          })}
+
+          {/* Dynamic snapping guidelines */}
+          {isSnapEnabled && snapGuides.x !== null && (
+            <div style={{ position: 'absolute', left: snapGuides.x, top: -10000, bottom: -10000, width: '1px', borderLeft: '1px dashed #4caf50', zIndex: 1999, pointerEvents: 'none' }} />
+          )}
+          {isSnapEnabled && snapGuides.y !== null && (
+            <div style={{ position: 'absolute', top: snapGuides.y, left: -10000, right: -10000, height: '1px', borderTop: '1px dashed #4caf50', zIndex: 1999, pointerEvents: 'none' }} />
+          )}
+
           <svg className="brush-layer" style={{ overflow: 'visible', position: 'absolute', zIndex: 1000, pointerEvents: 'none' }}>
             {brushStrokes.map(s => <path key={s.id} d={s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} fill="none" stroke={s.color} strokeWidth={s.width} strokeLinecap="round" strokeLinejoin="round" />)}
             {currentStroke && <path d={currentStroke.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} fill="none" stroke={brushColor} strokeWidth={brushWidth} strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />}
@@ -236,10 +430,10 @@ export const Canvas: React.FC = () => {
         </div>
       </div>
 
-      <div className="brush-toolbar" style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '10px', background: '#242533', padding: '10px', borderRadius: '12px', border: '1px solid #3a3c50', zIndex: 1000, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+      <div className="brush-toolbar" style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '10px', background: 'var(--bg-toolbar)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', zIndex: 1000, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
         <button className={`btn ${isBrushMode ? 'primary' : ''}`} onClick={() => setBrushMode(!isBrushMode)} title="Brush Tool (B)"><Pencil size={18} /></button>
         <button className="btn" onClick={clearBrush} title="Clear Drawings (Shift+X)"><Eraser size={18} /></button>
-        <div style={{ width: '1px', background: '#3a3c50', margin: '0 5px' }} />
+        <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 5px' }} />
         <button className="btn" onClick={undo} title="Undo (Ctrl+Z)"><RotateCcw size={18} /></button>
         <button className="btn" onClick={redo} title="Redo (Ctrl+Shift+Z)"><RotateCw size={18} /></button>
         <div className="color-picker-wrapper">
