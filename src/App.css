@@ -672,9 +672,9 @@ body.light-theme {
   stroke-width: 3;
 }
 
-.connection-path.selected {
-  stroke: #ef5350;
-  stroke-dasharray: 5,5;
+.connection-group.selected .connection-path {
+  stroke: #4caf50;
+  stroke-width: 3;
 }
 
 /* Shape Popover styling */
