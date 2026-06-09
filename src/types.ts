@@ -1,4 +1,4 @@
-export type ElementType = 'text' | 'button' | 'image' | 'shape' | 'node' | 'video';
+export type ElementType = 'text' | 'button' | 'image' | 'shape' | 'node' | 'video' | 'icon';
 
 export interface BaseElement {
   id: string;
@@ -15,6 +15,8 @@ export interface BaseElement {
   isHidden?: boolean;
   enableExpandButton?: boolean;
   isPinned?: boolean;
+  isLocked?: boolean;
+  isSlide?: boolean;
 }
 
 export interface NodeElement extends BaseElement {
@@ -87,7 +89,13 @@ export interface ShapeElement extends BaseElement {
   textAlign?: 'left' | 'center' | 'right' | 'justify';
 }
 
-export type CanvasElement = TextElement | ButtonElement | ImageElement | ShapeElement | NodeElement | VideoElement;
+export interface IconElement extends BaseElement {
+  type: 'icon';
+  iconName: string;
+  color: string;
+}
+
+export type CanvasElement = TextElement | ButtonElement | ImageElement | ShapeElement | NodeElement | VideoElement | IconElement;
 
 export type PortPosition = 'top' | 'right' | 'bottom' | 'left';
 
@@ -101,6 +109,9 @@ export interface Connection {
   labelAlignment?: 'horizontal' | 'follow';
   startArrow?: 'none' | 'arrow';
   endArrow?: 'none' | 'arrow';
+  fontFamily?: string;
+  fontSize?: number;
+  color?: string;
 }
 
 export interface BrushStroke {

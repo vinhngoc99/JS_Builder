@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useBuilder } from '../BuilderContext';
 import { ElementWrapper } from './ElementWrapper';
-import { ZoomIn, ZoomOut, Maximize, MousePointer2, Type, Square, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw, X } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, MousePointer2, Type, Square, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw, X, Settings, Smile } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 export const Canvas: React.FC = () => {
@@ -9,10 +9,10 @@ export const Canvas: React.FC = () => {
     elements, connections, selectElement, connectingNode, setConnectingNode, 
     selectedIds, selectedConnectionId, selectConnection, removeElement, removeConnection, 
     scale, setScale, pan, setPan, editingFocalPointId, setEditingFocalPointId, 
-    addElement, removeSelected, duplicateSelected,
+    addElement, removeSelected, duplicateSelected, updateElement,
     brushStrokes, isBrushMode, brushColor, brushWidth, setBrushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo, saveHistory,
     theme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, isPresenting, setIsPresenting,
-    currentSlideIndex, setCurrentSlideIndex, isHelpOpen, setIsHelpOpen,
+    currentSlideIndex, setCurrentSlideIndex, revealDownstream, isHelpOpen, setIsHelpOpen,
     brushTool, setBrushTool, eraseBrushStrokesAt
   } = useBuilder();
 
@@ -76,12 +76,18 @@ export const Canvas: React.FC = () => {
   }, [isPresenting, isLaserActive, laserPos]);
 
   const goToSlide = useCallback((index: number) => {
-    const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+    const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
     if (slides.length === 0) return;
     const safeIndex = Math.max(0, Math.min(index, slides.length - 1));
     setCurrentSlideIndex(safeIndex);
     
     const slide = slides[safeIndex];
+    
+    if (slide.isHidden) {
+      updateElement(slide.id, { isHidden: false });
+      revealDownstream(slide.id);
+    }
+
     if (!canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
@@ -98,7 +104,7 @@ export const Canvas: React.FC = () => {
     
     setScale(targetScale);
     setPan({ x: targetPanX, y: targetPanY });
-  }, [elements, setScale, setPan]);
+  }, [elements, setScale, setPan, updateElement, revealDownstream, setCurrentSlideIndex]);
 
   useEffect(() => {
     if (isPresenting) {
@@ -151,7 +157,7 @@ export const Canvas: React.FC = () => {
       }
 
       if (isPresenting) {
-        const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+        const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
         if (e.key === 'ArrowRight' || e.key === ' ' || e.code === 'Space' || e.key === 'Enter') {
           e.preventDefault();
           if (currentSlideIndex < slides.length - 1) {
@@ -166,6 +172,26 @@ export const Canvas: React.FC = () => {
           e.preventDefault();
           setIsPresenting(false);
         }
+        return;
+      }
+
+      if (!isInput && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && selectedIds.length > 0) {
+        e.preventDefault();
+        saveHistory();
+        const moveAmount = e.shiftKey ? 10 : 1;
+        let dx = 0;
+        let dy = 0;
+        if (e.key === 'ArrowUp') dy = -moveAmount;
+        else if (e.key === 'ArrowDown') dy = moveAmount;
+        else if (e.key === 'ArrowLeft') dx = -moveAmount;
+        else if (e.key === 'ArrowRight') dx = moveAmount;
+
+        selectedIds.forEach(id => {
+          const el = elements.find(x => x.id === id);
+          if (el && !el.isLocked) {
+            updateElement(el.id, { x: el.x + dx, y: el.y + dy });
+          }
+        });
         return;
       }
 
@@ -397,7 +423,10 @@ export const Canvas: React.FC = () => {
   };
 
   const getPathData = (startX: number, startY: number, startPort: string, endX: number, endY: number, endPort: string) => {
-    const controlDist = 60;
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const dist = Math.hypot(dx, dy);
+    const controlDist = Math.min(Math.max(dist * 0.35, 30), 120);
     let cx1 = startX, cy1 = startY, cx2 = endX, cy2 = endY;
     if (startPort === 'top') cy1 -= controlDist; else if (startPort === 'bottom') cy1 += controlDist; else if (startPort === 'left') cx1 -= controlDist; else cx1 += controlDist;
     if (endPort === 'top') cy2 -= controlDist; else if (endPort === 'bottom') cy2 += controlDist; else if (endPort === 'left') cx2 -= controlDist; else cx2 += controlDist;
@@ -488,11 +517,11 @@ export const Canvas: React.FC = () => {
           
           <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute', pointerEvents: isBrushMode ? 'none' : 'auto' }}>
             <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c6d80" />
+              <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 L 2.5 5 z" fill="#6c6d80" />
               </marker>
-              <marker id="arrow-selected" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#4caf50" />
+              <marker id="arrow-selected" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 L 2.5 5 z" fill="#4caf50" />
               </marker>
             </defs>
             {connections.map(conn => {
@@ -521,11 +550,11 @@ export const Canvas: React.FC = () => {
                   
                   {conn.label && (
                     conn.labelAlignment === 'follow' ? (
-                      <text fill="#e0e0e0" fontSize="14" dy="-5" pointerEvents="none" fontWeight="bold">
+                      <text fill={conn.color || "#e0e0e0"} fontSize={conn.fontSize || "14"} fontFamily={conn.fontFamily} dy="-5" pointerEvents="none" fontWeight="bold">
                         <textPath href={`#editor-conn-${conn.id}`} startOffset="50%" text-anchor="middle">{conn.label}</textPath>
                       </text>
                     ) : (
-                      <text x={midX} y={midY} fill="#e0e0e0" fontSize="14" textAnchor="middle" dominantBaseline="middle" pointerEvents="none" fontWeight="bold" paintOrder="stroke fill" stroke="#17181f" strokeWidth="4px">
+                      <text x={midX} y={midY} fill={conn.color || "#e0e0e0"} fontSize={conn.fontSize || "14"} fontFamily={conn.fontFamily} textAnchor="middle" dominantBaseline="middle" pointerEvents="none" fontWeight="bold" paintOrder="stroke fill" stroke="#17181f" strokeWidth="4px">
                         {conn.label}
                       </text>
                     )
@@ -665,6 +694,7 @@ export const Canvas: React.FC = () => {
           <div className="context-menu-item" onClick={() => handleAddElementFromMenu('button')}><MousePointer2 size={14} /> Add Button</div>
           <div className="context-menu-item" onClick={() => handleAddElementFromMenu('image')}><ImageIcon size={14} /> Add Image</div>
           <div className="context-menu-item" onClick={() => handleAddElementFromMenu('video')}><Play size={14} /> Add Video</div>
+          <div className="context-menu-item" onClick={() => handleAddElementFromMenu('icon')}><Smile size={14} /> Add Icon</div>
           {selectedIds.length > 0 && (
             <>
               <div className="context-menu-separator" />
@@ -713,19 +743,40 @@ export const Canvas: React.FC = () => {
             &larr; Prev
           </button>
           
-          <span style={{ fontWeight: 600, fontSize: '14px', minWidth: '80px', textAlign: 'center' }}>
-            Slide {elements.filter(el => el.type === 'node').length > 0 ? currentSlideIndex + 1 : 0} of {elements.filter(el => el.type === 'node').length}
-          </span>
+          <select 
+            value={currentSlideIndex}
+            onChange={(e) => goToSlide(parseInt(e.target.value))}
+            style={{ 
+              background: 'var(--input-bg)', 
+              color: 'var(--text-primary)', 
+              border: '1px solid var(--border-color)', 
+              borderRadius: '8px', 
+              padding: '4px 8px', 
+              fontSize: '13px', 
+              fontWeight: 600,
+              cursor: 'pointer',
+              outline: 'none'
+            }}
+          >
+            {elements
+              .filter(el => el.type === 'node' && (el as any).isSlide !== false)
+              .sort((a, b) => a.x - b.x)
+              .map((slide, idx) => (
+                <option key={slide.id} value={idx}>
+                  Slide {idx + 1}: {slide.title || `Node ${idx + 1}`}
+                </option>
+              ))}
+          </select>
           
           <button 
             className="btn" 
             onClick={() => {
-              const slidesCount = elements.filter(el => el.type === 'node').length;
+              const slidesCount = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).length;
               if (currentSlideIndex < slidesCount - 1) setCurrentSlideIndex(currentSlideIndex + 1);
             }} 
-            disabled={currentSlideIndex === elements.filter(el => el.type === 'node').length - 1}
+            disabled={currentSlideIndex === elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).length - 1}
             tabIndex={-1}
-            style={{ padding: '6px 12px', opacity: currentSlideIndex === elements.filter(el => el.type === 'node').length - 1 ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
+            style={{ padding: '6px 12px', opacity: currentSlideIndex === elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).length - 1 ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
           >
             Next &rarr;
           </button>

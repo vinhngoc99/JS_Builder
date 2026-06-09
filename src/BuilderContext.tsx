@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
-import { CanvasElement, ElementType, Connection, PortPosition, BrushStroke, Variant } from './types';
+import { CanvasElement, ElementType, Connection, PortPosition, BrushStroke, Variant, IconElement } from './types';
+import { getIconSvgPath } from './icons';
 import { v4 as uuidv4 } from 'uuid';
 
 // --- Utilities ---
@@ -88,6 +89,8 @@ interface BuilderContextType {
   connections: Connection[];
   selectedIds: string[];
   selectedConnectionId: string | null;
+  isPropertiesOpen: boolean;
+  setIsPropertiesOpen: (open: boolean) => void;
   connectingNode: ConnectingState | null;
   scale: number;
   pan: { x: number; y: number };
@@ -297,6 +300,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [isPresenting, setIsPresenting] = useState(false);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isPropertiesOpen, setIsPropertiesOpen] = useState(true);
   
   const [isBrushMode, setIsBrushMode] = useState(false);
   const [brushColor, setBrushColorVal] = useState('#4caf50');
@@ -648,6 +652,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         case 'image': width = 150; height = 150; break;
         case 'video': width = 280; height = 157; break;
         case 'shape': width = 100; height = 100; break;
+        case 'icon': width = 60; height = 60; break;
       }
     }
     if (additionalProps?.height) height = additionalProps.height;
@@ -671,6 +676,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       case 'image': newElement = { ...baseProps, type: 'image', src: 'https://images.unsplash.com/photo-1531297172867-4f40136225a4?auto=format&fit=crop&w=300&q=80', alt: 'Placeholder', objectFit: 'cover', borderWidth: 0, borderColor: '#4caf50', borderRadius: 4, ...additionalProps }; break;
       case 'video': newElement = { ...baseProps, type: 'video', src: '', borderWidth: 0, borderColor: '#4caf50', borderRadius: 8, ...additionalProps }; break;
       case 'shape': newElement = { ...baseProps, type: 'shape', shapeType: 'rectangle', backgroundColor: 'transparent', borderColor: '#4caf50', borderWidth: 2, borderRadius: 8, color: 'var(--text-primary)', ...additionalProps }; break;
+      case 'icon': newElement = { ...baseProps, type: 'icon', iconName: additionalProps?.iconName || 'home', color: 'var(--text-primary)', ...additionalProps }; break;
       default: return;
     }
     setElements([...elements, newElement as CanvasElement]); setSelectedIds([id]); setSelectedConnectionId(null);
@@ -817,11 +823,15 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       setSelectedIds([id]);
     }
     setSelectedConnectionId(null);
+    setIsPropertiesOpen(true);
   };
 
   const selectConnection = (id: string | null) => {
     setSelectedConnectionId(id);
-    if (id) setSelectedIds([]);
+    if (id) {
+      setSelectedIds([]);
+      setIsPropertiesOpen(true);
+    }
   };
 
   const addConnection = (fromId: string, fromPort: PortPosition, toId: string, toPort: PortPosition) => {
@@ -911,6 +921,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       const elAny = el as any;
       if (elAny.fontFamily) {
         const clean = elAny.fontFamily.replace(/['"]/g, '').trim();
+        if (clean) usedFonts.add(clean);
+      }
+    });
+    connections.forEach(conn => {
+      if (conn.fontFamily) {
+        const clean = conn.fontFamily.replace(/['"]/g, '').trim();
         if (clean) usedFonts.add(clean);
       }
     });
@@ -1097,14 +1113,19 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           const safeImgTitle = elAny.title ? escapeHtml(elAny.title) : '';
           const safeAlt = escapeHtml(el.alt);
           const imgHeader = safeImgTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeImgTitle}</div>` : '';
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
+          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative; overflow: hidden;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
           break;
         }
         case 'video': {
           const safeVidTitle = elAny.title ? escapeHtml(elAny.title) : '';
           const safeSrc = escapeHtml(el.src);
           const vidHeader = safeVidTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeVidTitle}</div>` : '';
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${vidHeader}<div style="flex: 1;"><iframe id="el-${el.id}" src="${safeSrc}" style="width: 100%; height: 100%; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; box-sizing: border-box;" frameborder="0" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe></div></div>`;
+          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${vidHeader}<div style="flex: 1; position: relative; overflow: hidden;"><iframe id="el-${el.id}" src="${safeSrc}" style="width: 100%; height: 100%; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; box-sizing: border-box;" frameborder="0" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe></div></div>`;
+          break;
+        }
+        case 'icon': {
+          const svgPath = getIconSvgPath(el.iconName || 'home');
+          innerContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" width="100%" height="100%" stroke="${el.color || 'var(--text-primary)'}" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;">${svgPath}</svg></div>`;
           break;
         }
         case 'shape': {
@@ -1140,10 +1161,15 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       const toEl = elements.find(el => el.id === conn.toId);
       const isHidden = hiddenConnections.has(conn.id) || (fromEl && fromEl.isHidden) || (toEl && toEl.isHidden);
       const safeLabel = conn.label ? escapeHtml(conn.label) : '';
+      
+      const connFontFamily = conn.fontFamily ? ` font-family="${conn.fontFamily.replace(/"/g, '&quot;')}"` : '';
+      const connFontSize = conn.fontSize || 14;
+      const connColor = conn.color || '#e0e0e0';
+
       const labelHTML = safeLabel ? (
         conn.labelAlignment === 'follow'
-          ? `<text fill="#e0e0e0" font-size="14" dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
-          : `<text id="conn-label-${conn.id}" fill="#e0e0e0" font-size="14" text-anchor="middle" dominant-baseline="middle" pointer-events="none" font-weight="bold" paint-order="stroke fill" stroke="#17181f" stroke-width="4px">${safeLabel}</text>`
+          ? `<text fill="${connColor}" font-size="${connFontSize}"${connFontFamily} dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
+          : `<text id="conn-label-${conn.id}" fill="${connColor}" font-size="${connFontSize}"${connFontFamily} text-anchor="middle" dominant-baseline="middle" pointer-events="none" font-weight="bold" paint-order="stroke fill" stroke="#17181f" stroke-width="4px">${safeLabel}</text>`
       ) : '';
       const markerStartAttr = conn.startArrow === 'arrow' ? 'marker-start="url(#arrow)"' : '';
       const markerEndAttr = conn.endArrow === 'arrow' ? 'marker-end="url(#arrow)"' : '';
@@ -1280,8 +1306,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <div id="interactive-content" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0;">
           <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible;">
             <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c6d80" />
+              <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 L 2.5 5 z" fill="#6c6d80" />
               </marker>
             </defs>
             <g id="connections-layer">${svgPaths}</g>
@@ -1307,7 +1333,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       </div>
       <div id="presentation-bar" style="display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 24px; padding: 8px 24px; align-items: center; gap: 20px; z-index: 10000; box-shadow: 0 12px 32px rgba(0,0,0,0.6); color: var(--text-primary);">
         <button class="conn-btn" id="prev-slide-btn" onclick="prevSlide()" tabindex="-1" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">&larr; Prev</button>
-        <span id="slide-num-text" style="font-weight: 600; font-size: 14px; min-width: 80px; text-align: center;">Slide 1 of X</span>
+        <select id="slide-select" onchange="goToSlide(parseInt(this.value))" tabindex="-1" style="background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 4px 8px; font-size: 13px; font-weight: 600; cursor: pointer; outline: none;"></select>
         <button class="conn-btn" id="next-slide-btn" onclick="nextSlide()" tabindex="-1" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">Next &rarr;</button>
         <div style="width: 1px; background: var(--border-color); height: 20px;"></div>
         <button class="conn-btn" onclick="exitPresentation()" tabindex="-1" style="background: #ef5350; border-radius: 12px; padding: 6px 16px; border: none; font-size: 13px; cursor: pointer; color: #fff; font-weight: 600;">Exit</button>
@@ -1390,7 +1416,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           let isPresenting = false;
 
           window.startPresentation = () => {
-            slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+            slides = elements.filter(el => el.type === 'node' && el.isSlide !== false).sort((a, b) => a.x - b.x);
             if (slides.length === 0) {
               showNotification('No Node Containers found to present.');
               return;
@@ -1403,6 +1429,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             document.querySelector('.zoom-controls').style.display = 'none';
             
             document.body.classList.add('presentation-mode');
+            
+            const selectEl = document.getElementById('slide-select');
+            if (selectEl) {
+              selectEl.innerHTML = slides.map((s, idx) => '<option value="' + idx + '">Slide ' + (idx + 1) + ': ' + (s.title || 'Slide ' + (idx + 1)) + '</option>').join('');
+            }
             
             goToSlide(0);
           };
@@ -1425,6 +1456,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             currentSlideIndex = Math.max(0, Math.min(index, slides.length - 1));
             
             const slide = slides[currentSlideIndex];
+            const slideEl = document.getElementById('el-wrapper-' + slide.id);
+            if (slideEl && slideEl.classList.contains('is-hidden')) {
+              revealCascade(slide.id);
+            }
             const padding = 60;
             const availW = window.innerWidth - padding * 2;
             const availH = window.innerHeight - padding * 2;
@@ -1446,12 +1481,15 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             document.getElementById('next-slide-btn').disabled = (currentSlideIndex === slides.length - 1);
             document.getElementById('next-slide-btn').style.opacity = (currentSlideIndex === slides.length - 1) ? '0.4' : '1';
             
-            document.getElementById('slide-num-text').innerText = 'Slide ' + (currentSlideIndex + 1) + ' of ' + slides.length;
+            const selectEl = document.getElementById('slide-select');
+            if (selectEl) {
+              selectEl.value = currentSlideIndex + '';
+            }
           };
 
           window.nextSlide = () => {
             if (slides.length === 0) {
-              slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+              slides = elements.filter(el => el.type === 'node' && el.isSlide !== false).sort((a, b) => a.x - b.x);
             }
             if (slides.length === 0) return;
             if (!isPresenting) {
@@ -1463,7 +1501,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
           window.prevSlide = () => {
             if (slides.length === 0) {
-              slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+              slides = elements.filter(el => el.type === 'node' && el.isSlide !== false).sort((a, b) => a.x - b.x);
             }
             if (slides.length === 0) return;
             if (!isPresenting) {
@@ -1694,7 +1732,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
           window.goToSlideById = function(id) {
             if (slides.length === 0) {
-              slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+              slides = elements.filter(el => el.type === 'node' && el.isSlide !== false).sort((a, b) => a.x - b.x);
             }
             const index = slides.findIndex(s => s.id === id);
             if (index !== -1) {
@@ -1796,7 +1834,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               const f = getAbsoluteBounds(conn.fromId), t = getAbsoluteBounds(conn.toId); if (!f || !t) return;
               const coords = (b, p) => { let x = b.x + b.width/2, y = b.y + b.height/2; if (p === 'top') y = b.y; else if (p === 'bottom') y = b.y + b.height; else if (p === 'left') x = b.x; else x = b.x + b.width; return {x, y}; };
               const s = coords(f, conn.fromPort), e = coords(t, conn.toPort);
-              const cd = 50; let cx1 = s.x, cy1 = s.y, cx2 = e.x, cy2 = e.y;
+              const dx = e.x - s.x;
+              const dy = e.y - s.y;
+              const dist = Math.hypot(dx, dy);
+              const cd = Math.min(Math.max(dist * 0.35, 30), 120);
+              let cx1 = s.x, cy1 = s.y, cx2 = e.x, cy2 = e.y;
               if (conn.fromPort === 'top') cy1 -= cd; else if (conn.fromPort === 'bottom') cy1 += cd; else if (conn.fromPort === 'left') cx1 -= cd; else cx1 += cd;
               if (conn.toPort === 'top') cy2 -= cd; else if (conn.toPort === 'bottom') cy2 += cd; else if (conn.toPort === 'left') cx2 -= cd; else cx2 += cd;
               path.setAttribute('d', 'M ' + s.x + ' ' + s.y + ' C ' + cx1 + ' ' + cy1 + ', ' + cx2 + ' ' + cy2 + ', ' + e.x + ' ' + e.y);
@@ -1874,6 +1916,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       isBlurEnabled, setIsBlurEnabled: handleSetIsBlurEnabled,
       currentSlideIndex, setCurrentSlideIndex, revealDownstream,
       isHelpOpen, setIsHelpOpen,
+      isPropertiesOpen, setIsPropertiesOpen,
       variants, activeVariantId, switchVariant, addVariant, deleteVariant, renameVariant, importHTML,
       showAlert, showConfirm
     }}>

@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Settings } from 'lucide-react';
 import { useBuilder, getAdaptedTextColor, getAdaptedBorderColor, getAdaptedBgColor } from '../BuilderContext';
 import { CanvasElement, PortPosition } from '../types';
+import { getIconSvgPath } from '../icons';
 
 interface ElementWrapperProps {
   element: CanvasElement;
@@ -231,6 +232,10 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
       selectElement(element.id, false);
     } else if (isMulti) {
       selectElement(element.id, true);
+    }
+
+    if (element.isLocked) {
+      return;
     }
 
     startPos.current = { x: e.clientX, y: e.clientY };
@@ -888,7 +893,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                   revealDownstream(target);
                 }
               } else if (action === 'nextSlide') {
-                const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+                const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
                 if (currentSlideIndex < slides.length - 1) {
                   setCurrentSlideIndex(currentSlideIndex + 1);
                 }
@@ -898,7 +903,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                 }
               } else if (action === 'goToSlide') {
                 if (target) {
-                  const slides = elements.filter(el => el.type === 'node').sort((a, b) => a.x - b.x);
+                  const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
                   const targetIdx = slides.findIndex(s => s.id === target);
                   if (targetIdx !== -1) {
                     setCurrentSlideIndex(targetIdx);
@@ -1169,6 +1174,26 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
           </div>
         );
       }
+      case 'icon': {
+        const svgPath = getIconSvgPath(element.iconName || 'home');
+        return (
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justify: 'center' }}>
+            <svg 
+              viewBox="0 0 24 24" 
+              width="100%" 
+              height="100%" 
+              stroke={element.color || 'currentColor'} 
+              fill="none" 
+              strokeWidth="2" 
+              strokeLinecap="round" 
+              strokeLinejoin="round"
+              style={{ display: 'block' }}
+            >
+              <g dangerouslySetInnerHTML={{ __html: svgPath }} />
+            </svg>
+          </div>
+        );
+      }
       case 'node':
         return <>{elements.filter(el => el.parentId === element.id).map(child => <ElementWrapper key={child.id} element={child} />)}</>;
       default: return null;
@@ -1248,7 +1273,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
           <div className="node-handle left" onPointerDown={(e) => handlePortDown(e, 'left')} onPointerUp={(e) => handlePortUp(e, 'left')} />
         </>
       )}
-      {isSelected && !isEditingFocalPoint && (
+      {isSelected && !isEditingFocalPoint && !element.isLocked && (
         <>
           <div className="rotate-handle" onPointerDown={handleRotateStart} onDoubleClick={(e) => { e.stopPropagation(); updateElement(element.id, { rotation: 0 }); }} title="Rotate Element (Double-click to reset)" />
           <div className="resize-handle nw" onPointerDown={(e) => handleResizeStart(e, 'nw')} /><div className="resize-handle ne" onPointerDown={(e) => handleResizeStart(e, 'ne')} />

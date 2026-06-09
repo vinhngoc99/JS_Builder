@@ -2,7 +2,8 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { useBuilder } from '../BuilderContext';
 import { CustomColorPicker } from './CustomColorPicker';
-import { AlignLeft, AlignCenter, AlignRight, AlignJustify } from 'lucide-react';
+import { AlignLeft, AlignCenter, AlignRight, AlignJustify, Settings, X } from 'lucide-react';
+import { ICON_MAP } from '../icons';
 
 const Divider = () => <div style={{ height: '1px', background: '#2d2e3e', margin: '10px 0' }} />;
 
@@ -22,7 +23,7 @@ const Toggle = ({ label, checked, onChange, color = '#4caf50' }: { label: string
 
 
 export const PropertiesPanel: React.FC = () => {
-  const { elements, selectedIds, updateElement, removeElement, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, isPresenting, setIsPresenting } = useBuilder();
+  const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, isPresenting, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen } = useBuilder();
 
   const lastSelectedId = selectedIds[selectedIds.length - 1];
   const selectedElement = elements.find(el => el.id === lastSelectedId);
@@ -80,11 +81,45 @@ export const PropertiesPanel: React.FC = () => {
   </>);
 
   // --- Empty ---
+  const handleClose = () => setIsPropertiesOpen(false);
+
+  if (!isPropertiesOpen) {
+    return (
+      <button 
+        onClick={() => setIsPropertiesOpen(true)}
+        style={{
+          position: 'fixed',
+          right: '16px',
+          top: '16px',
+          width: '44px',
+          height: '44px',
+          borderRadius: '50%',
+          backgroundColor: 'var(--bg-toolbar)',
+          border: '1px solid var(--border-color)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          zIndex: 1000,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          color: 'var(--text-primary)',
+          transition: 'all 0.2s',
+        }}
+        title="Show Properties Panel"
+      >
+        <Settings size={20} />
+      </button>
+    );
+  }
+
   if (!selectedElement && !selectedConnectionId) {
     return (
       <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', padding: '10px 0' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Global Settings</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Global Settings</div>
+            <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Hide Panel"><X size={16} /></button>
+          </div>
           <Divider />
           <Toggle label="Light Theme" checked={theme === 'light'} onChange={(v) => setTheme(v ? 'light' : 'dark')} color="#4caf50" />
           <Toggle label="Enable Snapping" checked={isSnapEnabled} onChange={(v) => setIsSnapEnabled(v)} color="#4caf50" />
@@ -107,13 +142,25 @@ export const PropertiesPanel: React.FC = () => {
     if (!sc) return null;
     return (
       <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '12px' }}>Connection</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Connection</div>
+          <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Hide Panel"><X size={16} /></button>
+        </div>
         <Label>Label</Label>
         <input type="text" value={sc.label || ''} onChange={(e) => updateConnection(sc.id, { label: e.target.value })} placeholder="Label..." />
         <Label>Alignment</Label>
         <select value={sc.labelAlignment || 'horizontal'} onChange={(e) => updateConnection(sc.id, { labelAlignment: e.target.value as any })}>
           <option value="horizontal">Horizontal</option><option value="follow">Follow Curve</option>
         </select>
+        
+        <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+          <div style={{ flex: 2 }}><Label>Font</Label><select value={sc.fontFamily || 'sans-serif'} onChange={(e) => updateConnection(sc.id, { fontFamily: e.target.value })}>{fontOptions}</select></div>
+          <div style={{ flex: 1 }}><Label>Size</Label><input type="number" value={sc.fontSize || 14} onChange={(e) => updateConnection(sc.id, { fontSize: parseInt(e.target.value) || 14 })} /></div>
+        </div>
+        <div style={{ marginTop: '6px' }}>
+          <CustomColorPicker label="Text Color" name="color" value={sc.color || '#e0e0e0'} onChange={(e) => updateConnection(sc.id, { color: e.target.value })} onTransparent={() => updateConnection(sc.id, { color: 'transparent' })} />
+        </div>
+
         <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
           <div style={{ flex: 1 }}><Label>Start</Label><select value={sc.startArrow || 'none'} onChange={(e) => updateConnection(sc.id, { startArrow: e.target.value as any })}><option value="none">—</option><option value="arrow">Arrow</option></select></div>
           <div style={{ flex: 1 }}><Label>End</Label><select value={sc.endArrow || 'none'} onChange={(e) => updateConnection(sc.id, { endArrow: e.target.value as any })}><option value="none">—</option><option value="arrow">Arrow</option></select></div>
@@ -132,40 +179,67 @@ export const PropertiesPanel: React.FC = () => {
     const { name, value, type } = e.target;
     let parsedValue: string | number = value;
     if (type === 'number') parsedValue = parseFloat(value);
-    if (name === 'src' && typeof parsedValue === 'string') {
-      const driveMatch = parsedValue.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/) || parsedValue.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
-      if (driveMatch && driveMatch[1]) {
-        if (selectedElement?.type === 'image') parsedValue = `https://lh3.googleusercontent.com/d/${driveMatch[1]}`;
-        else if (selectedElement?.type === 'video') parsedValue = `https://drive.google.com/file/d/${driveMatch[1]}/preview`;
+    
+    selectedIds.forEach(id => {
+      const targetEl = elements.find(el => el.id === id);
+      if (!targetEl) return;
+      let val = parsedValue;
+      
+      if (name === 'src' && typeof val === 'string') {
+        const driveMatch = val.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/) || val.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+        if (driveMatch && driveMatch[1]) {
+          if (targetEl.type === 'image') val = `https://lh3.googleusercontent.com/d/${driveMatch[1]}`;
+          else if (targetEl.type === 'video') val = `https://drive.google.com/file/d/${driveMatch[1]}/preview`;
+        }
+        if (targetEl.type === 'image') {
+          const img = new Image();
+          img.onload = () => { const maxWidth = 500; let newW = img.width, newH = img.height; if (newW > maxWidth) { const r = maxWidth / newW; newW = maxWidth; newH = img.height * r; } updateElement(targetEl.id, { width: newW, height: newH, src: val as string }); };
+          img.src = val as string;
+          return;
+        }
+        if (targetEl.type === 'video') {
+          updateElement(targetEl.id, { width: 560, height: 315, src: val as string });
+          return;
+        }
       }
-      if (selectedElement?.type === 'image') {
-        const img = new Image();
-        img.onload = () => { const maxWidth = 500; let newW = img.width, newH = img.height; if (newW > maxWidth) { const r = maxWidth / newW; newW = maxWidth; newH = img.height * r; } updateElement(selectedElement.id, { width: newW, height: newH, src: parsedValue as string }); };
-        img.src = parsedValue as string;
-      }
-      if (selectedElement?.type === 'video') updateElement(selectedElement.id, { width: 560, height: 315, src: parsedValue as string });
-    }
-    if (selectedElement) {
-      if (name === 'width' && (parsedValue as number) < 10) parsedValue = 10;
-      if (name === 'height' && (parsedValue as number) < 10) parsedValue = 10;
-      updateElement(selectedElement.id, { [name]: parsedValue });
-    }
+      if (name === 'width' && (val as number) < 10) val = 10;
+      if (name === 'height' && (val as number) < 10) val = 10;
+      updateElement(id, { [name]: val });
+    });
   };
 
   const handleToggle = (name: string, value: boolean) => {
-    if (selectedElement) updateElement(selectedElement.id, { [name]: value });
+    selectedIds.forEach(id => {
+      updateElement(id, { [name]: value });
+    });
+  };
+
+  const handleColorTransparent = (name: string) => {
+    selectedIds.forEach(id => {
+      updateElement(id, { [name]: 'transparent' });
+    });
+  };
+
+  const handleAlignText = (align: 'left' | 'center' | 'right' | 'justify') => {
+    selectedIds.forEach(id => {
+      const targetEl = elements.find(el => el.id === id);
+      if (targetEl && ['text', 'button', 'shape', 'node'].includes(targetEl.type)) {
+        updateElement(id, { textAlign: align });
+      }
+    });
   };
 
   const el = selectedElement as any;
 
   const renderAlignmentToolbar = (elementToAlign: any) => {
+    if (!elementToAlign) return null;
     return (
       <>
         <Label>Text Alignment</Label>
         <div style={{ display: 'flex', gap: '4px', marginTop: '6px', background: 'rgba(0,0,0,0.2)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
           <button 
             className="btn"
-            onClick={() => updateElement(elementToAlign.id, { textAlign: 'left' })}
+            onClick={() => handleAlignText('left')}
             onMouseDown={(e) => e.preventDefault()}
             style={{ flex: 1, padding: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: elementToAlign.textAlign === 'left' ? '#4caf50' : 'transparent', color: elementToAlign.textAlign === 'left' ? '#fff' : 'var(--text-secondary)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
             title="Align Left"
@@ -174,7 +248,7 @@ export const PropertiesPanel: React.FC = () => {
           </button>
           <button 
             className="btn"
-            onClick={() => updateElement(elementToAlign.id, { textAlign: 'center' })}
+            onClick={() => handleAlignText('center')}
             onMouseDown={(e) => e.preventDefault()}
             style={{ flex: 1, padding: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: (!elementToAlign.textAlign || elementToAlign.textAlign === 'center') ? '#4caf50' : 'transparent', color: (!elementToAlign.textAlign || elementToAlign.textAlign === 'center') ? '#fff' : 'var(--text-secondary)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
             title="Align Center"
@@ -183,7 +257,7 @@ export const PropertiesPanel: React.FC = () => {
           </button>
           <button 
             className="btn"
-            onClick={() => updateElement(elementToAlign.id, { textAlign: 'right' })}
+            onClick={() => handleAlignText('right')}
             onMouseDown={(e) => e.preventDefault()}
             style={{ flex: 1, padding: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: elementToAlign.textAlign === 'right' ? '#4caf50' : 'transparent', color: elementToAlign.textAlign === 'right' ? '#fff' : 'var(--text-secondary)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
             title="Align Right"
@@ -192,7 +266,7 @@ export const PropertiesPanel: React.FC = () => {
           </button>
           <button 
             className="btn"
-            onClick={() => updateElement(elementToAlign.id, { textAlign: 'justify' })}
+            onClick={() => handleAlignText('justify')}
             onMouseDown={(e) => e.preventDefault()}
             style={{ flex: 1, padding: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: elementToAlign.textAlign === 'justify' ? '#4caf50' : 'transparent', color: elementToAlign.textAlign === 'justify' ? '#fff' : 'var(--text-secondary)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
             title="Justify"
@@ -204,16 +278,41 @@ export const PropertiesPanel: React.FC = () => {
     );
   };
 
-  return (
-    <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
-      {selectedIds.length > 1 && (
+  if (selectedIds.length > 1) {
+    const hasTextSupport = elements.some(el => selectedIds.includes(el.id) && ['text', 'button', 'shape', 'node'].includes(el.type));
+    const hasStylableSupport = elements.some(el => selectedIds.includes(el.id) && ['text', 'button', 'shape', 'node', 'image', 'video'].includes(el.type));
+    const firstWithText = elements.find(el => selectedIds.includes(el.id) && ['text', 'button', 'shape', 'node'].includes(el.type)) as any;
+    const firstWithStyle = elements.find(el => selectedIds.includes(el.id) && ['text', 'button', 'shape', 'node', 'image', 'video'].includes(el.type)) as any;
+    
+    const getCommonToggleState = (prop: string) => {
+      const selected = elements.filter(el => selectedIds.includes(el.id));
+      if (selected.length === 0) return false;
+      return selected.every(el => (el as any)[prop] === true);
+    };
+
+    const isAllSlide = elements.filter(el => selectedIds.includes(el.id) && el.type === 'node').every(el => (el as any).isSlide !== false);
+
+    return (
+      <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Bulk Edit</span>
+          <button 
+            onClick={handleClose} 
+            style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} 
+            title="Hide Panel"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div style={{ padding: '6px 10px', background: 'rgba(76, 175, 80, 0.15)', borderRadius: '6px', fontSize: '11px', color: '#4caf50', fontWeight: 600, textAlign: 'center', marginBottom: '8px' }}>
+          {selectedIds.length} elements selected
+        </div>
+
+        <Divider />
+
+        {/* Alignment controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
-          <div style={{ padding: '6px 10px', background: 'rgba(76, 175, 80, 0.15)', borderRadius: '6px', fontSize: '11px', color: '#4caf50', fontWeight: 600, textAlign: 'center' }}>
-            {selectedIds.length} elements selected
-          </div>
-
-          <div style={{ height: '1px', background: '#2d2e3e', margin: '4px 0' }} />
-
           <div style={{ fontSize: '11px', color: '#8c8d9c', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Align Selected</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
             <button className="btn" onClick={() => alignElements('left')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Align left edges">Left</button>
@@ -229,15 +328,92 @@ export const PropertiesPanel: React.FC = () => {
             <button className="btn" onClick={() => distributeElements('horizontal')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Distribute centers horizontally">Horizontal</button>
             <button className="btn" onClick={() => distributeElements('vertical')} style={{ padding: '6px 4px', fontSize: '10px', width: '100%', boxSizing: 'border-box' }} title="Distribute centers vertically">Vertical</button>
           </div>
-
-          <div style={{ height: '1px', background: '#2d2e3e', margin: '4px 0' }} />
         </div>
-      )}
 
+        <Divider />
+
+        {/* Common Switches */}
+        <Label>Properties</Label>
+        <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '6px 14px', border: '1px solid var(--border-color)', marginBottom: '8px' }}>
+          <Toggle label="Lock Position" checked={getCommonToggleState('isLocked')} onChange={(v) => handleToggle('isLocked', v)} color="#e91e63" />
+          <Toggle label="Disabled" checked={getCommonToggleState('isDisabled')} onChange={(v) => handleToggle('isDisabled', v)} color="#ef5350" />
+          <Toggle label="Hidden" checked={getCommonToggleState('isHidden')} onChange={(v) => handleToggle('isHidden', v)} color="#ff9800" />
+          <Toggle label="Pinned" checked={getCommonToggleState('isPinned')} onChange={(v) => handleToggle('isPinned', v)} color="#ab47bc" />
+          <Toggle label="Interactive Btns" checked={getCommonToggleState('enableExpandButton')} onChange={(v) => handleToggle('enableExpandButton', v)} color="#42a5f5" />
+          {elements.some(el => selectedIds.includes(el.id) && el.type === 'node') && (
+            <Toggle label="Include in Presentation" checked={isAllSlide} onChange={(v) => handleToggle('isSlide', v)} color="#3f51b5" />
+          )}
+        </div>
+
+        {/* Text styling */}
+        {hasTextSupport && (
+          <>
+            <Divider />
+            <Label>Text Formatting</Label>
+            <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+              <div style={{ flex: 2 }}>
+                <Label>Font</Label>
+                <select name="fontFamily" value={firstWithText?.fontFamily || 'sans-serif'} onChange={handleChange}>
+                  {fontOptions}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Label>Size</Label>
+                <input type="number" name="fontSize" value={firstWithText?.fontSize || 14} onChange={handleChange} />
+              </div>
+            </div>
+            {renderAlignmentToolbar(firstWithText)}
+            <div style={{ marginTop: '12px' }}>
+              <CustomColorPicker label="Text Color" name="color" value={firstWithText?.color || '#ffffff'} onChange={handleChange} onTransparent={() => handleColorTransparent('color')} />
+            </div>
+          </>
+        )}
+
+        {/* Styles (Fill / Line) */}
+        {hasStylableSupport && (
+          <>
+            <Divider />
+            <Label>Style & Border</Label>
+            <div style={{ marginTop: '12px' }}>
+              <CustomColorPicker label="Fill Color" name="backgroundColor" value={firstWithStyle?.backgroundColor || 'transparent'} onChange={handleChange} onTransparent={() => handleColorTransparent('backgroundColor')} />
+              <CustomColorPicker label="Line Color" name="borderColor" value={firstWithStyle?.borderColor || 'transparent'} onChange={handleChange} onTransparent={() => handleColorTransparent('borderColor')} />
+            </div>
+            <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+              <div style={{ flex: 1 }}>
+                <Label>Line Width</Label>
+                <input type="number" name="borderWidth" value={firstWithStyle?.borderWidth || 0} onChange={handleChange} min={0} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Label>Border Radius</Label>
+                <input type="number" name="borderRadius" value={firstWithStyle?.borderRadius || 0} onChange={handleChange} min={0} />
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Actions */}
+        <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <button onClick={() => setIsPresenting(true)} className="btn" style={{ width: '100%', padding: '8px', background: '#3f51b5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Present Slideshow</button>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button onClick={removeSelected} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Delete Selected</button>
+            <button onClick={() => { setHtmlCode(exportHTML()); setPreviewMode(true); setModalOpen(true); }} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Preview</button>
+            <button onClick={handleGenerate} style={{ flex: 1, padding: '8px', background: '#4caf50', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Export</button>
+          </div>
+        </div>
+        {renderExportModal()}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '4px' }}>
-        <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{el.type.charAt(0).toUpperCase() + el.type.slice(1)}</span>
-        <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{el.id.substring(0, 8)}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{el.type.charAt(0).toUpperCase() + el.type.slice(1)}</span>
+          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{el.id.substring(0, 8)}</span>
+        </div>
+        <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Hide Panel"><X size={16} /></button>
       </div>
 
       <Divider />
@@ -246,6 +422,7 @@ export const PropertiesPanel: React.FC = () => {
       <Label>Properties</Label>
       <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '6px 14px', border: '1px solid var(--border-color)', marginBottom: '8px' }}>
         {el.parentId && <Toggle label="Fill Parent" checked={!!el.fillParent} onChange={(v) => handleToggle('fillParent', v)} />}
+        <Toggle label="Lock Position" checked={!!el.isLocked} onChange={(v) => handleToggle('isLocked', v)} color="#e91e63" />
         <Toggle label="Disabled" checked={!!el.isDisabled} onChange={(v) => handleToggle('isDisabled', v)} color="#ef5350" />
         <Toggle label="Hidden" checked={!!el.isHidden} onChange={(v) => handleToggle('isHidden', v)} color="#ff9800" />
         <Toggle label="Pinned" checked={!!el.isPinned} onChange={(v) => handleToggle('isPinned', v)} color="#ab47bc" />
@@ -320,7 +497,7 @@ export const PropertiesPanel: React.FC = () => {
             <select name="actionTarget" value={el.actionTarget} onChange={handleChange}>
               <option value="">—</option>
               {elements
-                .filter(x => x.type === 'node')
+                .filter(x => x.type === 'node' && (x as any).isSlide !== false)
                 .map(x => (
                   <option key={x.id} value={x.id}>
                     Slide: {x.title || x.id.substring(0, 6)}
@@ -384,6 +561,21 @@ export const PropertiesPanel: React.FC = () => {
         <div style={{ marginTop: '12px' }}>
           <CustomColorPicker label="Text" name="color" value={el.color || '#ffffff'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
           <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
+        </div>
+        <div style={{ marginTop: '8px' }}>
+          <Toggle label="Include in Presentation" checked={el.isSlide !== false} onChange={(v) => handleToggle('isSlide', v)} color="#3f51b5" />
+        </div>
+      </>)}
+
+      {el.type === 'icon' && (<>
+        <Label>Icon Name</Label>
+        <select name="iconName" value={el.iconName || 'home'} onChange={handleChange}>
+          {Object.keys(ICON_MAP).map(name => (
+            <option key={name} value={name}>{name.toUpperCase()}</option>
+          ))}
+        </select>
+        <div style={{ marginTop: '12px' }}>
+          <CustomColorPicker label="Color" name="color" value={el.color || '#ffffff'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
         </div>
       </>)}
 
