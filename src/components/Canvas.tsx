@@ -632,10 +632,16 @@ export const Canvas: React.FC = () => {
               const markerStart = conn.startArrow === 'arrow' ? (selectedConnectionId === conn.id ? "url(#arrow-selected)" : "url(#arrow)") : "none";
               const markerEnd = conn.endArrow === 'arrow' ? (selectedConnectionId === conn.id ? "url(#arrow-selected)" : "url(#arrow)") : "none";
 
+              const isConnHidden = f.isHidden || t.isHidden;
               return (
                 <g 
                   key={conn.id} 
                   className={`connection-group ${selectedConnectionId === conn.id ? 'selected' : ''}`} 
+                  style={{ 
+                    opacity: isConnHidden ? (isPresenting ? 0 : 0.4) : 1, 
+                    pointerEvents: isConnHidden ? 'none' : 'auto',
+                    transition: 'opacity 0.4s ease'
+                  }}
                   onPointerDown={(e) => { e.stopPropagation(); selectConnection(conn.id); }}
                   onDoubleClick={(e) => { e.stopPropagation(); removeConnection(conn.id); }}
                 >
@@ -762,7 +768,8 @@ export const Canvas: React.FC = () => {
                   strokeWidth={s.width}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  opacity={isHidden ? 0.2 : 1}
+                  opacity={isHidden ? (isPresenting ? 0 : 0.2) : 1}
+                  style={{ transition: 'opacity 0.4s ease' }}
                 />
               );
             })}

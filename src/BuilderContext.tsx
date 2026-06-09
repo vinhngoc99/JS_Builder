@@ -937,7 +937,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 id: uuidv4(),
                 points: currentPoints,
                 color: stroke.color,
-                width: stroke.width
+                width: stroke.width,
+                attachedNodeId: stroke.attachedNodeId
               });
             }
             currentPoints = [];
@@ -951,7 +952,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             id: stroke.id,
             points: currentPoints,
             color: stroke.color,
-            width: stroke.width
+            width: stroke.width,
+            attachedNodeId: stroke.attachedNodeId
           });
         }
       }

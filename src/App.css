@@ -411,6 +411,11 @@ body.light-theme {
   pointer-events: auto;
 }
 
+.is-presenting .element-wrapper.is-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .element-wrapper.is-hidden.selected {
   opacity: 0.4;
   outline: 2px dashed #ff9800;
