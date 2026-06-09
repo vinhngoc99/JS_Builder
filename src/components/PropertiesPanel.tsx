@@ -147,7 +147,72 @@ export const PropertiesPanel: React.FC = () => {
           <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Hide Panel"><X size={16} /></button>
         </div>
         <Label>Label</Label>
-        <input type="text" value={sc.label || ''} onChange={(e) => updateConnection(sc.id, { label: e.target.value })} placeholder="Label..." />
+        <input 
+          type="text" 
+          value={sc.label || ''} 
+          onChange={(e) => {
+            const val = e.target.value;
+            const updates: Partial<Connection> = { label: val };
+            if (val) {
+              const lower = val.toLowerCase().trim();
+              if (lower === 'no' || lower === 'không' || lower === 'n' || lower === 'k') {
+                updates.interactiveBtnText = 'NO';
+              } else if (lower === 'yes' || lower === 'có' || lower === 'y') {
+                updates.interactiveBtnText = 'YES';
+              } else if (!sc.interactiveBtnText) {
+                updates.interactiveBtnText = 'YES';
+              }
+            } else {
+              updates.interactiveBtnText = undefined;
+            }
+            updateConnection(sc.id, updates);
+          }} 
+          placeholder="Label..." 
+        />
+
+        {sc.label && (
+          <>
+            <Label>Interactive Button Text</Label>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+              <button
+                className="btn"
+                onClick={() => updateConnection(sc.id, { interactiveBtnText: 'YES' })}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  background: (sc.interactiveBtnText || 'YES') === 'YES' ? '#4caf50' : 'var(--btn-bg)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '12px',
+                  transition: 'background-color 0.2s'
+                }}
+              >
+                YES
+              </button>
+              <button
+                className="btn"
+                onClick={() => updateConnection(sc.id, { interactiveBtnText: 'NO' })}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  background: sc.interactiveBtnText === 'NO' ? '#4caf50' : 'var(--btn-bg)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '12px',
+                  transition: 'background-color 0.2s'
+                }}
+              >
+                NO
+              </button>
+            </div>
+          </>
+        )}
         <Label>Alignment</Label>
         <select value={sc.labelAlignment || 'horizontal'} onChange={(e) => updateConnection(sc.id, { labelAlignment: e.target.value as any })}>
           <option value="horizontal">Horizontal</option><option value="follow">Follow Curve</option>

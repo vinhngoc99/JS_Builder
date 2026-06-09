@@ -1041,7 +1041,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           for (const [side, conns] of Object.entries(groups)) {
             if (conns.length === 0) continue;
             const btns = conns.map(c => {
-              const lbl = c.label ? escapeHtml(c.label) : arrows[side];
+              const lbl = c.label ? escapeHtml(c.interactiveBtnText || 'YES') : arrows[side];
               const btnClass = 'conn-btn';
               return '<button class="' + btnClass + '" data-target="' + c.toId + '" onclick="event.stopPropagation(); toggleOneTarget(this, \'' + c.toId + '\', \'' + el.id + '\')">' + lbl + '</button>';
             }).join('');
@@ -1266,49 +1266,53 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.3s ease;
-          transform-origin: center center;
         }
         .show-btns .conn-btn-group { opacity: 1 !important; pointer-events: auto !important; }
         .conn-btn-group.top {
-          top: -32px;
+          top: -26px;
           left: 50%;
           transform: translateX(-50%) scale(var(--conn-btn-scale, 1));
+          transform-origin: bottom center;
           flex-direction: row;
         }
         .conn-btn-group.bottom {
-          bottom: -32px;
+          bottom: -26px;
           left: 50%;
           transform: translateX(-50%) scale(var(--conn-btn-scale, 1));
+          transform-origin: top center;
           flex-direction: row;
         }
         .conn-btn-group.left {
-          left: -32px;
+          left: -26px;
           top: 50%;
           transform: translateY(-50%) scale(var(--conn-btn-scale, 1));
+          transform-origin: right center;
           flex-direction: column;
         }
         .conn-btn-group.right {
-          right: -32px;
+          right: -26px;
           top: 50%;
           transform: translateY(-50%) scale(var(--conn-btn-scale, 1));
+          transform-origin: left center;
           flex-direction: column;
         }
         .conn-btn { 
           background: #3f51b5; 
           color: #fff; 
-          border: 2px solid #1e1f2e; 
-          padding: 6px 12px; 
-          border-radius: 8px; 
-          font-size: 12px; 
+          border: 1.5px solid #1e1f2e; 
+          padding: 4px 8px; 
+          border-radius: 5px; 
+          font-size: 10px; 
           font-weight: 700; 
           cursor: pointer; 
-          box-shadow: 0 2px 6px rgba(0,0,0,0.5); 
-          transition: transform 0.2s, background-color 0.2s; 
+          box-shadow: 0 2px 6px rgba(0,0,0,0.4); 
+          transition: transform 0.15s ease, background-color 0.15s ease; 
           white-space: nowrap; 
           line-height: 1.2; 
         }
-        .conn-btn:hover { background: #5c6bc0; transform: scale(1.1); }
+        .conn-btn:hover { background: #5c6bc0; transform: scale(1.08); }
         .conn-btn.active { background: #f44336; }
+        .conn-btn.clicked-hidden { display: none !important; }
         .flow-reveal { animation: flowIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         .flow-hide { animation: flowOut 0.25s cubic-bezier(0.4, 0, 0.6, 1) forwards; }
         @keyframes flowIn { from { opacity: 0; transform: scale(0.85) translateY(12px); } to { opacity: 1; transform: scale(1) translateY(0); } }
@@ -1705,7 +1709,13 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (event) event.stopPropagation();
             const el = document.getElementById('el-wrapper-' + id);
             if (!el) return;
-            el.classList.toggle('show-btns');
+            const isShowingNow = el.classList.toggle('show-btns');
+            if (isShowingNow) {
+              // Show all buttons again (clear any temporary hide class) when reopening
+              el.querySelectorAll('.conn-btn').forEach(btn => {
+                btn.classList.remove('clicked-hidden');
+              });
+            }
           };
 
           function revealCascade(id) {
@@ -1741,9 +1751,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (isShowing) {
               if (connGroup) animateWire(connGroup, true);
               revealCascade(targetId);
+              btn.classList.add('clicked-hidden');
             } else {
               if (connGroup) animateWire(connGroup, false);
               hideCascade(targetId);
+              btn.classList.remove('clicked-hidden');
             }
           };
 
@@ -1766,7 +1778,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 bg.style.opacity = '0';
                 bg.style.pointerEvents = 'none';
               });
-              el.querySelectorAll('.conn-btn.active').forEach(cb => cb.classList.remove('active'));
+              el.querySelectorAll('.conn-btn').forEach(cb => {
+                cb.classList.remove('active', 'clicked-hidden');
+              });
             }, {once: true});
 
             document.querySelectorAll('.connection-group').forEach(cg => {

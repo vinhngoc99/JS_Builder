@@ -113,6 +113,7 @@ export interface Connection {
   fontSize?: number;
   color?: string;
   reverseLabelDirection?: boolean;
+  interactiveBtnText?: 'YES' | 'NO';
 }
 
 export interface BrushStroke {
