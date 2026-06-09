@@ -112,6 +112,7 @@ export interface Connection {
   fontFamily?: string;
   fontSize?: number;
   color?: string;
+  reverseLabelDirection?: boolean;
 }
 
 export interface BrushStroke {

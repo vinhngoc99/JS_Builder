@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
 import { useBuilder } from '../BuilderContext';
 import { ElementWrapper } from './ElementWrapper';
 import { ZoomIn, ZoomOut, Maximize, MousePointer2, Type, Square, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw, X, Settings, Smile } from 'lucide-react';
@@ -20,7 +20,7 @@ export const Canvas: React.FC = () => {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, originalX: number, originalY: number } | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
   const [currentStroke, setCurrentStroke] = useState<{ x: number, y: number }[] | null>(null);
   const [isErasing, setIsErasing] = useState(false);
@@ -282,12 +282,68 @@ export const Canvas: React.FC = () => {
     setSelectionBox({ x1: x, y1: y, x2: x, y2: y });
   };
 
-  const handleContextMenu = (e: React.MouseEvent) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }); };
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return;
+    
+    const menuEl = contextMenuRef.current;
+    const rect = menuEl.getBoundingClientRect();
+    const width = rect.width || 190;
+    const height = rect.height || 250;
+    
+    let adjustedX = contextMenu.originalX;
+    let adjustedY = contextMenu.originalY;
+    
+    if (adjustedX + width > window.innerWidth) {
+      adjustedX = window.innerWidth - width - 10;
+    }
+    if (adjustedY + height > window.innerHeight) {
+      adjustedY = window.innerHeight - height - 10;
+    }
+    
+    adjustedX = Math.max(10, adjustedX);
+    adjustedY = Math.max(10, adjustedY);
+    
+    if (adjustedX !== contextMenu.x || adjustedY !== contextMenu.y) {
+      setContextMenu({
+        x: adjustedX,
+        y: adjustedY,
+        originalX: contextMenu.originalX,
+        originalY: contextMenu.originalY
+      });
+    }
+  }, [contextMenu, selectedIds]);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const menuWidth = 190;
+    const target = e.target as HTMLElement;
+    const isElementClick = !!target.closest('.element-wrapper') || selectedIds.length > 0;
+    const menuHeight = isElementClick ? 330 : 250;
+    
+    let x = e.clientX;
+    let y = e.clientY;
+    
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10;
+    }
+    
+    x = Math.max(10, x);
+    y = Math.max(10, y);
+    
+    setContextMenu({ x, y, originalX: e.clientX, originalY: e.clientY });
+  };
 
   const handleAddElementFromMenu = (type: any) => {
     if (!contextMenu) return;
     const rect = canvasRef.current!.getBoundingClientRect();
-    const x = (contextMenu.x - rect.left - pan.x) / scale, y = (contextMenu.y - rect.top - pan.y) / scale;
+    const clickX = 'originalX' in contextMenu ? contextMenu.originalX : contextMenu.x;
+    const clickY = 'originalY' in contextMenu ? contextMenu.originalY : contextMenu.y;
+    const x = (clickX - rect.left - pan.x) / scale, y = (clickY - rect.top - pan.y) / scale;
     addElement(type, { x: x - 50, y: y - 25 }); setContextMenu(null);
   };
 
@@ -517,11 +573,11 @@ export const Canvas: React.FC = () => {
           
           <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute', pointerEvents: isBrushMode ? 'none' : 'auto' }}>
             <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 1.5 L 10 5 L 0 8.5 L 2.5 5 z" fill="#6c6d80" />
+              <marker id="arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#6c6d80" />
               </marker>
-              <marker id="arrow-selected" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 1.5 L 10 5 L 0 8.5 L 2.5 5 z" fill="#4caf50" />
+              <marker id="arrow-selected" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#4caf50" />
               </marker>
             </defs>
             {connections.map(conn => {
@@ -531,10 +587,43 @@ export const Canvas: React.FC = () => {
 
               const fb = getAbsoluteBounds(conn.fromId), tb = getAbsoluteBounds(conn.toId); 
               if (!fb || !tb) return null;
-              const { x: sx, y: sy } = getPortCoords(fb, conn.fromPort), { x: ex, y: ey } = getPortCoords(tb, conn.toPort);
-              const pathData = getPathData(sx, sy, conn.fromPort, ex, ey, conn.toPort);
-              const midX = 0.125 * sx + 0.375 * (conn.fromPort === 'left' ? sx - 60 : conn.fromPort === 'right' ? sx + 60 : sx) + 0.375 * (conn.toPort === 'left' ? ex - 60 : conn.toPort === 'right' ? ex + 60 : ex) + 0.125 * ex;
-              const midY = 0.125 * sy + 0.375 * (conn.fromPort === 'top' ? sy - 60 : conn.fromPort === 'bottom' ? sy + 60 : sy) + 0.375 * (conn.toPort === 'top' ? ey - 60 : conn.toPort === 'bottom' ? ey + 60 : ey) + 0.125 * ey;
+              
+              let { x: sx, y: sy } = getPortCoords(fb, conn.fromPort);
+              let { x: ex, y: ey } = getPortCoords(tb, conn.toPort);
+
+              // Shorten path if there are arrowheads to create an aesthetic gap
+              const gap = 1.8;
+              if (conn.startArrow === 'arrow') {
+                if (conn.fromPort === 'top') sy -= gap;
+                else if (conn.fromPort === 'bottom') sy += gap;
+                else if (conn.fromPort === 'left') sx -= gap;
+                else if (conn.fromPort === 'right') sx += gap;
+              }
+              if (conn.endArrow === 'arrow') {
+                if (conn.toPort === 'top') ey -= gap;
+                else if (conn.toPort === 'bottom') ey += gap;
+                else if (conn.toPort === 'left') ex -= gap;
+                else if (conn.toPort === 'right') ex += gap;
+              }
+
+              const dx = ex - sx;
+              const dy = ey - sy;
+              const dist = Math.hypot(dx, dy);
+              const controlDist = Math.min(Math.max(dist * 0.35, 30), 120);
+              let cx1 = sx, cy1 = sy, cx2 = ex, cy2 = ey;
+              if (conn.fromPort === 'top') cy1 -= controlDist; 
+              else if (conn.fromPort === 'bottom') cy1 += controlDist; 
+              else if (conn.fromPort === 'left') cx1 -= controlDist; 
+              else cx1 += controlDist;
+
+              if (conn.toPort === 'top') cy2 -= controlDist; 
+              else if (conn.toPort === 'bottom') cy2 += controlDist; 
+              else if (conn.toPort === 'left') cx2 -= controlDist; 
+              else cx2 += controlDist;
+
+              const midX = 0.125 * sx + 0.375 * cx1 + 0.375 * cx2 + 0.125 * ex;
+              const midY = 0.125 * sy + 0.375 * cy1 + 0.375 * cy2 + 0.125 * ey;
+              const pathData = `M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${ex} ${ey}`;
               const markerStart = conn.startArrow === 'arrow' ? (selectedConnectionId === conn.id ? "url(#arrow-selected)" : "url(#arrow)") : "none";
               const markerEnd = conn.endArrow === 'arrow' ? (selectedConnectionId === conn.id ? "url(#arrow-selected)" : "url(#arrow)") : "none";
 
@@ -550,13 +639,47 @@ export const Canvas: React.FC = () => {
                   
                   {conn.label && (
                     conn.labelAlignment === 'follow' ? (
-                      <text fill={conn.color || "#e0e0e0"} fontSize={conn.fontSize || "14"} fontFamily={conn.fontFamily} dy="-5" pointerEvents="none" fontWeight="bold">
-                        <textPath href={`#editor-conn-${conn.id}`} startOffset="50%" text-anchor="middle">{conn.label}</textPath>
-                      </text>
+                      <>
+                        {conn.reverseLabelDirection && (
+                          <path 
+                            id={`editor-conn-text-${conn.id}`} 
+                            d={`M ${ex} ${ey} C ${cx2} ${cy2}, ${cx1} ${cy1}, ${sx} ${sy}`} 
+                            fill="none" 
+                            stroke="none" 
+                            pointerEvents="none" 
+                          />
+                        )}
+                        <text fill={conn.color || "var(--text-primary)"} fontSize={conn.fontSize || "14"} fontFamily={conn.fontFamily} dy="-5" pointerEvents="none" fontWeight="bold">
+                          <textPath href={conn.reverseLabelDirection ? `#editor-conn-text-${conn.id}` : `#editor-conn-${conn.id}`} startOffset="50%" textAnchor="middle">{conn.label}</textPath>
+                        </text>
+                      </>
                     ) : (
-                      <text x={midX} y={midY} fill={conn.color || "#e0e0e0"} fontSize={conn.fontSize || "14"} fontFamily={conn.fontFamily} textAnchor="middle" dominantBaseline="middle" pointerEvents="none" fontWeight="bold" paintOrder="stroke fill" stroke="#17181f" strokeWidth="4px">
-                        {conn.label}
-                      </text>
+                      <foreignObject 
+                        x={midX - 200} 
+                        y={midY - 20} 
+                        width={400} 
+                        height={40} 
+                        pointerEvents="none"
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: '100%', pointerEvents: 'none' }}>
+                          <span 
+                            style={{ 
+                              background: 'var(--bg-canvas)', 
+                              padding: '3px 10px', 
+                              borderRadius: '100px', 
+                              fontSize: `${conn.fontSize || 12}px`, 
+                              color: conn.color || 'var(--text-primary)', 
+                              fontWeight: 'bold', 
+                              whiteSpace: 'nowrap',
+                              border: '1px solid var(--border-color)',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                              fontFamily: conn.fontFamily || 'inherit'
+                            }}
+                          >
+                            {conn.label}
+                          </span>
+                        </div>
+                      </foreignObject>
                     )
                   )}
                 </g>
@@ -687,7 +810,7 @@ export const Canvas: React.FC = () => {
       )}
 
       {contextMenu && !isPresenting && (
-        <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+        <div ref={contextMenuRef} className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <div className="context-menu-item" onClick={() => handleAddElementFromMenu('node')}><Layout size={14} /> Add Node</div>
           <div className="context-menu-separator" />
           <div className="context-menu-item" onClick={() => handleAddElementFromMenu('text')}><Type size={14} /> Add Text</div>
@@ -698,8 +821,8 @@ export const Canvas: React.FC = () => {
           {selectedIds.length > 0 && (
             <>
               <div className="context-menu-separator" />
-              <div className="context-menu-item" onClick={duplicateSelected}><Copy size={14} /> Duplicate Selected</div>
-              <div className="context-menu-item" onClick={removeSelected} style={{ color: '#ef5350' }}><Trash2 size={14} /> Delete Selected</div>
+              <div className="context-menu-item" onClick={() => { duplicateSelected(); setContextMenu(null); }}><Copy size={14} /> Duplicate Selected</div>
+              <div className="context-menu-item" onClick={() => { removeSelected(); setContextMenu(null); }} style={{ color: '#ef5350' }}><Trash2 size={14} /> Delete Selected</div>
             </>
           )}
         </div>

@@ -23,7 +23,7 @@ const Toggle = ({ label, checked, onChange, color = '#4caf50' }: { label: string
 
 
 export const PropertiesPanel: React.FC = () => {
-  const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, isPresenting, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen } = useBuilder();
+  const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, isPresenting, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory } = useBuilder();
 
   const lastSelectedId = selectedIds[selectedIds.length - 1];
   const selectedElement = elements.find(el => el.id === lastSelectedId);
@@ -141,7 +141,7 @@ export const PropertiesPanel: React.FC = () => {
     const sc = connections.find(c => c.id === selectedConnectionId);
     if (!sc) return null;
     return (
-      <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
+      <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`} onFocus={saveHistory}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Connection</div>
           <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Hide Panel"><X size={16} /></button>
@@ -152,6 +152,17 @@ export const PropertiesPanel: React.FC = () => {
         <select value={sc.labelAlignment || 'horizontal'} onChange={(e) => updateConnection(sc.id, { labelAlignment: e.target.value as any })}>
           <option value="horizontal">Horizontal</option><option value="follow">Follow Curve</option>
         </select>
+        
+        {sc.labelAlignment === 'follow' && (
+          <div style={{ marginTop: '6px' }}>
+            <Toggle 
+              label="Reverse Text Direction" 
+              checked={!!sc.reverseLabelDirection} 
+              onChange={(v) => updateConnection(sc.id, { reverseLabelDirection: v })} 
+              color="#4caf50" 
+            />
+          </div>
+        )}
         
         <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
           <div style={{ flex: 2 }}><Label>Font</Label><select value={sc.fontFamily || 'sans-serif'} onChange={(e) => updateConnection(sc.id, { fontFamily: e.target.value })}>{fontOptions}</select></div>
@@ -209,18 +220,21 @@ export const PropertiesPanel: React.FC = () => {
   };
 
   const handleToggle = (name: string, value: boolean) => {
+    saveHistory();
     selectedIds.forEach(id => {
       updateElement(id, { [name]: value });
     });
   };
 
   const handleColorTransparent = (name: string) => {
+    saveHistory();
     selectedIds.forEach(id => {
       updateElement(id, { [name]: 'transparent' });
     });
   };
 
   const handleAlignText = (align: 'left' | 'center' | 'right' | 'justify') => {
+    saveHistory();
     selectedIds.forEach(id => {
       const targetEl = elements.find(el => el.id === id);
       if (targetEl && ['text', 'button', 'shape', 'node'].includes(targetEl.type)) {
@@ -406,7 +420,7 @@ export const PropertiesPanel: React.FC = () => {
   }
 
   return (
-    <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
+    <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`} onFocus={saveHistory}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>

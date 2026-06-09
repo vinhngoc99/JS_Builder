@@ -1037,12 +1037,6 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         if (outConnections.length > 0) {
           const groups: Record<string, typeof outConnections> = { top: [], right: [], bottom: [], left: [] };
           outConnections.forEach(c => { const side = c.fromPort || 'bottom'; if (groups[side]) groups[side].push(c); });
-          const posMap: Record<string, string> = {
-            top: 'top: -32px; left: 50%; transform: translateX(-50%); flex-direction: row;',
-            bottom: 'bottom: -32px; left: 50%; transform: translateX(-50%); flex-direction: row;',
-            left: 'left: -32px; top: 50%; transform: translateY(-50%); flex-direction: column;',
-            right: 'right: -32px; top: 50%; transform: translateY(-50%); flex-direction: column;',
-          };
           const arrows: Record<string, string> = { top: '\u25b2', bottom: '\u25bc', left: '\u25c0', right: '\u25b6' };
           for (const [side, conns] of Object.entries(groups)) {
             if (conns.length === 0) continue;
@@ -1051,7 +1045,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               const btnClass = 'conn-btn';
               return '<button class="' + btnClass + '" data-target="' + c.toId + '" onclick="event.stopPropagation(); toggleOneTarget(this, \'' + c.toId + '\', \'' + el.id + '\')">' + lbl + '</button>';
             }).join('');
-            expandBtnHTML += '<div class="conn-btn-group" style="position:absolute; ' + posMap[side] + ' display:flex; gap:4px; z-index:100; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;">' + btns + '</div>';
+            expandBtnHTML += '<div class="conn-btn-group ' + side + '">' + btns + '</div>';
           }
         }
       }
@@ -1164,12 +1158,15 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       
       const connFontFamily = conn.fontFamily ? ` font-family="${conn.fontFamily.replace(/"/g, '&quot;')}"` : '';
       const connFontSize = conn.fontSize || 14;
-      const connColor = conn.color || '#e0e0e0';
+      const connColor = conn.color || 'var(--text-primary)';
 
       const labelHTML = safeLabel ? (
         conn.labelAlignment === 'follow'
-          ? `<text fill="${connColor}" font-size="${connFontSize}"${connFontFamily} dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
-          : `<text id="conn-label-${conn.id}" fill="${connColor}" font-size="${connFontSize}"${connFontFamily} text-anchor="middle" dominant-baseline="middle" pointer-events="none" font-weight="bold" paint-order="stroke fill" stroke="#17181f" stroke-width="4px">${safeLabel}</text>`
+          ? (conn.reverseLabelDirection
+              ? `<path id="conn-text-${conn.id}" fill="none" stroke="none" pointer-events="none" /><text fill="${connColor}" font-size="${connFontSize}"${connFontFamily} dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-text-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
+              : `<text fill="${connColor}" font-size="${connFontSize}"${connFontFamily} dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
+            )
+          : `<foreignObject id="conn-label-${conn.id}" x="0" y="0" width="400" height="40" pointer-events="none"><div style="display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; pointer-events: none;"><span style="background: var(--bg-canvas); padding: 3px 10px; border-radius: 100px; font-size: ${connFontSize}px; color: ${connColor}; font-weight: bold; white-space: nowrap; border: 1px solid var(--border-color); box-shadow: 0 2px 8px rgba(0,0,0,0.15);${conn.fontFamily ? ` font-family: ${conn.fontFamily};` : ''}">${safeLabel}</span></div></foreignObject>`
       ) : '';
       const markerStartAttr = conn.startArrow === 'arrow' ? 'marker-start="url(#arrow)"' : '';
       const markerEndAttr = conn.endArrow === 'arrow' ? 'marker-end="url(#arrow)"' : '';
@@ -1231,7 +1228,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         .zoom-controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); padding: 5px; padding-left: 20px; border-radius: 40px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 15px; color: var(--text-primary); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
         .btn-fit { background: #3f51b5; border: none; color: white; padding: 10px 24px; border-radius: 30px; cursor: pointer; font-size: 13px; font-weight: 700; transition: all 0.2s; white-space: nowrap; box-shadow: 0 4px 12px rgba(63, 81, 181, 0.3); }
         .btn-fit:hover { background: #4c5fd7; transform: scale(1.05); }
-        .brush-toolbar { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: var(--bg-toolbar); padding: 10px; borderRadius: 12px; border: 1px solid var(--border-color); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        .brush-toolbar { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: var(--bg-toolbar); padding: 10px; borderRadius: 12px; border: 1px solid var(--border-color); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.5); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease; }
+        .brush-toolbar.hidden-toolbar { transform: translateX(-50%) translateY(-100px); opacity: 0; pointer-events: none; }
         .btn-tool { background: var(--btn-bg); border: none; color: var(--text-primary); width: 38px; height: 38px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
         .btn-tool:hover { background: var(--btn-hover-bg); }
         .btn-tool svg { width: 18px; height: 18px; }
@@ -1260,9 +1258,55 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           transform: scale(1.08);
           background: var(--btn-hover-bg);
         }
-        .conn-btn-group { opacity: 1; pointer-events: auto; }
+        .conn-btn-group {
+          position: absolute;
+          display: flex;
+          gap: 4px;
+          z-index: 100;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.3s ease;
+          transform-origin: center center;
+        }
         .show-btns .conn-btn-group { opacity: 1 !important; pointer-events: auto !important; }
-        .conn-btn { background: #3f51b5; color: #fff; border: 2px solid #1e1f2e; padding: 3px 8px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.5); transition: all 0.2s; white-space: nowrap; line-height: 1.2; }
+        .conn-btn-group.top {
+          top: -32px;
+          left: 50%;
+          transform: translateX(-50%) scale(var(--conn-btn-scale, 1));
+          flex-direction: row;
+        }
+        .conn-btn-group.bottom {
+          bottom: -32px;
+          left: 50%;
+          transform: translateX(-50%) scale(var(--conn-btn-scale, 1));
+          flex-direction: row;
+        }
+        .conn-btn-group.left {
+          left: -32px;
+          top: 50%;
+          transform: translateY(-50%) scale(var(--conn-btn-scale, 1));
+          flex-direction: column;
+        }
+        .conn-btn-group.right {
+          right: -32px;
+          top: 50%;
+          transform: translateY(-50%) scale(var(--conn-btn-scale, 1));
+          flex-direction: column;
+        }
+        .conn-btn { 
+          background: #3f51b5; 
+          color: #fff; 
+          border: 2px solid #1e1f2e; 
+          padding: 6px 12px; 
+          border-radius: 8px; 
+          font-size: 12px; 
+          font-weight: 700; 
+          cursor: pointer; 
+          box-shadow: 0 2px 6px rgba(0,0,0,0.5); 
+          transition: transform 0.2s, background-color 0.2s; 
+          white-space: nowrap; 
+          line-height: 1.2; 
+        }
         .conn-btn:hover { background: #5c6bc0; transform: scale(1.1); }
         .conn-btn.active { background: #f44336; }
         .flow-reveal { animation: flowIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
@@ -1306,14 +1350,14 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <div id="interactive-content" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0;">
           <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible;">
             <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 1.5 L 10 5 L 0 8.5 L 2.5 5 z" fill="#6c6d80" />
+              <marker id="arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#6c6d80" />
               </marker>
             </defs>
             <g id="connections-layer">${svgPaths}</g>
           </svg>
           <div id="elements-layer">${rootElements}</div>
-          <svg id="canvas-svg-top" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; overflow: visible;"><g id="brush-layer">${brushPaths}</g></svg>
+           <svg id="canvas-svg-top" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; overflow: visible;"><g id="edit-brush-layer" pointer-events="none">${brushPaths}</g><g id="brush-layer"></g></svg>
         </div>
       </div>
       <div class="brush-toolbar">
@@ -1330,7 +1374,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         </div>
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <div class="color-picker-btn"><input type="color" id="brush-color" value="#4caf50" style="width:150%;height:150%;margin:-25%;border:none;cursor:pointer;background:none;"></div>
+        <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
+        <button id="brush-hide" class="btn-tool" title="Hide Toolbar (H)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
       </div>
+      <button id="brush-show-btn" class="btn-tool" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1001; display: none; background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 50%; width: 42px; height: 42px; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); cursor: pointer; color: var(--text-primary);" title="Show Toolbar (H)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
       <div id="presentation-bar" style="display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 24px; padding: 8px 24px; align-items: center; gap: 20px; z-index: 10000; box-shadow: 0 12px 32px rgba(0,0,0,0.6); color: var(--text-primary);">
         <button class="conn-btn" id="prev-slide-btn" onclick="prevSlide()" tabindex="-1" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">&larr; Prev</button>
         <select id="slide-select" onchange="goToSlide(parseInt(this.value))" tabindex="-1" style="background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 4px 8px; font-size: 13px; font-weight: 600; cursor: pointer; outline: none;"></select>
@@ -1372,9 +1421,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           let isLaserActive = false, laserPos = { x: -100, y: -100 }, laserTrail = [];
           
           let history = [], redoStack = [];
-          function saveHistory() { history.push(JSON.stringify({elements: JSON.parse(JSON.stringify(elements)), brush: brushLayer.innerHTML})); redoStack = []; if(history.length > 50) history.shift(); }
-          function undo() { if(!history.length) return; redoStack.push(JSON.stringify({elements: JSON.parse(JSON.stringify(elements)), brush: brushLayer.innerHTML})); const last = JSON.parse(history.pop()); elements = last.elements; brushLayer.innerHTML = last.brush; updateAllElements(); updateConnections(); showNotification('Undo'); }
-          function redo() { if(!redoStack.length) return; history.push(JSON.stringify({elements: JSON.parse(JSON.stringify(elements)), brush: brushLayer.innerHTML})); const next = JSON.parse(redoStack.pop()); elements = next.elements; brushLayer.innerHTML = next.brush; updateAllElements(); updateConnections(); showNotification('Redo'); }
+          function saveHistory() { history.push(brushLayer.innerHTML); redoStack = []; if(history.length > 50) history.shift(); }
+          function undo() { if(!history.length) return; redoStack.push(brushLayer.innerHTML); const last = history.pop(); brushLayer.innerHTML = last; showNotification('Undo'); }
+          function redo() { if(!redoStack.length) return; history.push(brushLayer.innerHTML); const next = redoStack.pop(); brushLayer.innerHTML = next; showNotification('Redo'); }
 
           function updateAllElements() {
             elements.forEach(el => {
@@ -1398,10 +1447,23 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           };
 
           const clearBrush = () => { saveHistory(); brushLayer.innerHTML = ''; showNotification('Drawings cleared'); };
+          
+          const toggleToolbarVisibility = () => {
+            const toolbar = document.querySelector('.brush-toolbar');
+            const showBtn = document.getElementById('brush-show-btn');
+            if (toolbar && showBtn) {
+              const isHidden = toolbar.classList.toggle('hidden-toolbar');
+              showBtn.style.display = isHidden ? 'flex' : 'none';
+              showNotification(isHidden ? 'Toolbar hidden (Press H to show)' : 'Toolbar shown');
+            }
+          };
+
           document.getElementById('brush-toggle').onclick = toggleBrush;
           document.getElementById('brush-clear').onclick = clearBrush;
           document.getElementById('undo-btn').onclick = undo;
           document.getElementById('redo-btn').onclick = redo;
+          document.getElementById('brush-hide').onclick = toggleToolbarVisibility;
+          document.getElementById('brush-show-btn').onclick = toggleToolbarVisibility;
           
           const widthSlider = document.getElementById('brush-width-slider');
           const widthVal = document.getElementById('brush-width-val');
@@ -1426,6 +1488,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             document.getElementById('present-btn').style.display = 'none';
             document.getElementById('theme-toggle-btn').style.display = 'none';
             document.querySelector('.brush-toolbar').style.display = 'none';
+            const showBtn = document.getElementById('brush-show-btn');
+            if (showBtn) showBtn.style.display = 'none';
             document.querySelector('.zoom-controls').style.display = 'none';
             
             document.body.classList.add('presentation-mode');
@@ -1443,7 +1507,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             document.getElementById('presentation-bar').style.display = 'none';
             document.getElementById('present-btn').style.display = 'flex';
             document.getElementById('theme-toggle-btn').style.display = 'flex';
-            document.querySelector('.brush-toolbar').style.display = 'flex';
+            const toolbar = document.querySelector('.brush-toolbar');
+            const showBtn = document.getElementById('brush-show-btn');
+            const isHidden = toolbar.classList.contains('hidden-toolbar');
+            toolbar.style.display = isHidden ? 'none' : 'flex';
+            if (showBtn) showBtn.style.display = isHidden ? 'flex' : 'none';
             document.querySelector('.zoom-controls').style.display = 'flex';
             
             document.body.classList.remove('presentation-mode');
@@ -1538,6 +1606,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (e.code === 'Space' && !isInput) { e.preventDefault(); isSpaceDown = true; container.classList.add('space-down'); }
             if (e.key.toLowerCase() === 'b' && !isInput) toggleBrush();
             if (e.key.toLowerCase() === 'x' && !isInput) clearBrush();
+            if (e.key.toLowerCase() === 'h' && !isInput) { e.preventDefault(); toggleToolbarVisibility(); }
             if (e.ctrlKey && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
             if (e.ctrlKey && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
           };
@@ -1751,6 +1820,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             while(gridS > 60) gridS /= 2;
             container.style.backgroundSize = gridS + 'px ' + gridS + 'px';
             container.style.backgroundPosition = pan.x + 'px ' + pan.y + 'px';
+            
+            // Adjust interactive button scale when zoomed out
+            const btnScale = scale < 1 ? 1 / scale : 1;
+            container.style.setProperty('--conn-btn-scale', btnScale + '');
           }
 
           container.onwheel = e => {
@@ -1779,14 +1852,13 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input') || e.target.closest('select') || e.target.closest('textarea') || e.target.closest('.conn-btn-group') || e.target.closest('.conn-btn')) {
               return;
             }
-            const el = e.target.closest('.draggable-element');
-            if (el) {
-              saveHistory();
-              activeDrag = el;
-              startDrag = { x: e.clientX, y: e.clientY, ex: parseFloat(el.style.left), ey: parseFloat(el.style.top) };
-              el.style.zIndex = 2000;
-              e.stopPropagation();
-            }
+             const el = e.target.closest('.draggable-element');
+             if (el) {
+               activeDrag = el;
+               startDrag = { x: e.clientX, y: e.clientY, ex: parseFloat(el.style.left), ey: parseFloat(el.style.top) };
+               el.style.zIndex = 2000;
+               e.stopPropagation();
+             }
           }, false);
 
           window.addEventListener('pointermove', e => {
@@ -1834,6 +1906,19 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               const f = getAbsoluteBounds(conn.fromId), t = getAbsoluteBounds(conn.toId); if (!f || !t) return;
               const coords = (b, p) => { let x = b.x + b.width/2, y = b.y + b.height/2; if (p === 'top') y = b.y; else if (p === 'bottom') y = b.y + b.height; else if (p === 'left') x = b.x; else x = b.x + b.width; return {x, y}; };
               const s = coords(f, conn.fromPort), e = coords(t, conn.toPort);
+              const gap = 1.8;
+              if (conn.startArrow === 'arrow') {
+                if (conn.fromPort === 'top') s.y -= gap;
+                else if (conn.fromPort === 'bottom') s.y += gap;
+                else if (conn.fromPort === 'left') s.x -= gap;
+                else if (conn.fromPort === 'right') s.x += gap;
+              }
+              if (conn.endArrow === 'arrow') {
+                if (conn.toPort === 'top') e.y -= gap;
+                else if (conn.toPort === 'bottom') e.y += gap;
+                else if (conn.toPort === 'left') e.x -= gap;
+                else if (conn.toPort === 'right') e.x += gap;
+              }
               const dx = e.x - s.x;
               const dy = e.y - s.y;
               const dist = Math.hypot(dx, dy);
@@ -1842,11 +1927,24 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               if (conn.fromPort === 'top') cy1 -= cd; else if (conn.fromPort === 'bottom') cy1 += cd; else if (conn.fromPort === 'left') cx1 -= cd; else cx1 += cd;
               if (conn.toPort === 'top') cy2 -= cd; else if (conn.toPort === 'bottom') cy2 += cd; else if (conn.toPort === 'left') cx2 -= cd; else cx2 += cd;
               path.setAttribute('d', 'M ' + s.x + ' ' + s.y + ' C ' + cx1 + ' ' + cy1 + ', ' + cx2 + ' ' + cy2 + ', ' + e.x + ' ' + e.y);
+              const helperPath = document.getElementById('conn-text-' + conn.id);
+              if (helperPath) {
+                helperPath.setAttribute('d', 'M ' + e.x + ' ' + e.y + ' C ' + cx2 + ' ' + cy2 + ', ' + cx1 + ' ' + cy1 + ', ' + s.x + ' ' + s.y);
+              }
               const labelEl = document.getElementById('conn-label-' + conn.id);
               if (labelEl) {
                 const midX = 0.125 * s.x + 0.375 * cx1 + 0.375 * cx2 + 0.125 * e.x;
                 const midY = 0.125 * s.y + 0.375 * cy1 + 0.375 * cy2 + 0.125 * e.y;
-                if(labelEl.tagName === 'textPath') {} else { labelEl.setAttribute('x', midX); labelEl.setAttribute('y', midY); }
+                const tagName = labelEl.tagName.toLowerCase();
+                if (tagName === 'textpath') {
+                  // do nothing
+                } else if (tagName === 'foreignobject') {
+                  labelEl.setAttribute('x', (midX - 200).toString());
+                  labelEl.setAttribute('y', (midY - 20).toString());
+                } else {
+                  labelEl.setAttribute('x', midX.toString());
+                  labelEl.setAttribute('y', midY.toString());
+                }
               }
               const connGroup = document.getElementById('conn-group-' + conn.id);
               if (connGroup && (connGroup.classList.contains('wire-draw') || connGroup.classList.contains('wire-undraw'))) {
