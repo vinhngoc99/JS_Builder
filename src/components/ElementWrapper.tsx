@@ -731,7 +731,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                 border: '1px solid #4caf50',
                 borderRadius: `${element.borderRadius}px`,
                 boxSizing: 'border-box',
-                padding: '8px',
+                padding: '10px 14px',
+                lineHeight: '1.5',
                 overflowY: 'auto'
               }}
             >
@@ -758,7 +759,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                   textAlign: element.textAlign || 'center',
                   outline: 'none',
                   userSelect: 'text',
-                  wordBreak: 'break-word'
+                  wordBreak: 'break-word',
+                  lineHeight: '1.5'
                 }}
                 onPaste={(e) => {
                   e.preventDefault();
@@ -786,7 +788,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
               justifyContent: 'center', 
               wordBreak: 'break-word',
               overflow: 'hidden',
-              padding: '8px',
+              padding: '10px 14px',
+              lineHeight: '1.5',
               boxSizing: 'border-box'
             }}
           >
@@ -816,7 +819,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                 border: '1px solid #4caf50',
                 borderRadius: `${element.borderRadius}px`,
                 boxSizing: 'border-box',
-                padding: '4px',
+                padding: '8px 14px',
+                lineHeight: '1.5',
                 overflowY: 'auto'
               }}
             >
@@ -844,7 +848,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                   outline: 'none',
                   fontWeight: 'bold',
                   userSelect: 'text',
-                  wordBreak: 'break-word'
+                  wordBreak: 'break-word',
+                  lineHeight: '1.5'
                 }}
                 onPaste={(e) => {
                   e.preventDefault();
@@ -928,7 +933,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
               cursor: isPresenting ? 'pointer' : 'default',
               pointerEvents: 'auto',
               transition: 'opacity 0.2s, transform 0.1s',
-              padding: '4px',
+              padding: '8px 14px',
+              lineHeight: '1.5',
               boxSizing: 'border-box'
             }}
           >

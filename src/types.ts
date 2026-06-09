@@ -121,6 +121,7 @@ export interface BrushStroke {
   points: { x: number, y: number }[];
   color: string;
   width: number;
+  attachedNodeId?: string | null;
 }
 
 export interface Variant {

@@ -25,6 +25,7 @@ export const Canvas: React.FC = () => {
   const [currentStroke, setCurrentStroke] = useState<{ x: number, y: number }[] | null>(null);
   const [isErasing, setIsErasing] = useState(false);
   const lastEraserPos = useRef<{ x: number, y: number } | null>(null);
+  const brushCursorRef = useRef<HTMLDivElement>(null);
   
   const [snapGuides, setSnapGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const [draggedGuide, setDraggedGuide] = useState<{ id: string; type: 'horizontal' | 'vertical'; isNew: boolean } | null>(null);
@@ -348,6 +349,10 @@ export const Canvas: React.FC = () => {
   };
 
   const handlePointerMove = useCallback((e: PointerEvent) => {
+    if (brushCursorRef.current) {
+      brushCursorRef.current.style.left = `${e.clientX}px`;
+      brushCursorRef.current.style.top = `${e.clientY}px`;
+    }
     const rect = canvasRef.current!.getBoundingClientRect();
     if (draggedGuide) {
       if (draggedGuide.type === 'horizontal') {
@@ -543,7 +548,7 @@ export const Canvas: React.FC = () => {
   };
 
   return (
-    <div className={`canvas-container ${(isPresenting && isLaserActive) ? 'laser-cursor-none' : ''}`} onContextMenu={handleContextMenu}>
+    <div className={`canvas-container ${(isPresenting && isLaserActive) ? 'laser-cursor-none' : ''} ${(isBrushMode && !isSpaceDown) ? 'brush-cursor-none' : ''}`} onContextMenu={handleContextMenu}>
       {/* Rulers */}
       {!isPresenting && (
         <>
@@ -635,6 +640,7 @@ export const Canvas: React.FC = () => {
                   onDoubleClick={(e) => { e.stopPropagation(); removeConnection(conn.id); }}
                 >
                   <path id={`editor-conn-${conn.id}`} d={pathData} className="connection-path" markerStart={markerStart} markerEnd={markerEnd} />
+                  <path id={`editor-conn-pulse-${conn.id}`} d={pathData} className="flow-pulse-path" fill="none" stroke={conn.color || '#4c5fd7'} strokeWidth="2" strokeLinecap="round" opacity="0.8" />
                   <path d={pathData} stroke="transparent" strokeWidth="20" fill="none" />
                   
                   {conn.label && (
@@ -744,7 +750,22 @@ export const Canvas: React.FC = () => {
           )}
 
           <svg className="brush-layer" style={{ overflow: 'visible', position: 'absolute', zIndex: 1000, pointerEvents: 'none' }}>
-            {brushStrokes.map(s => <path key={s.id} d={s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} fill="none" stroke={s.color} strokeWidth={s.width} strokeLinecap="round" strokeLinejoin="round" />)}
+            {brushStrokes.map(s => {
+              const attachedNode = elements.find(el => el.id === s.attachedNodeId);
+              const isHidden = attachedNode ? attachedNode.isHidden : false;
+              return (
+                <path
+                  key={s.id}
+                  d={s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth={s.width}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={isHidden ? 0.2 : 1}
+                />
+              );
+            })}
             {currentStroke && <path d={currentStroke.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} fill="none" stroke={brushColor} strokeWidth={brushWidth} strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />}
           </svg>
 
@@ -1013,6 +1034,26 @@ export const Canvas: React.FC = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Custom Brush/Eraser Cursor */}
+      {isBrushMode && !isSpaceDown && (
+        <div
+          ref={brushCursorRef}
+          className="brush-custom-cursor"
+          style={{
+            left: '-100px',
+            top: '-100px',
+          }}
+        >
+          <div
+            className="brush-custom-cursor-circle"
+            style={{
+              width: `${brushWidth * scale}px`,
+              height: `${brushWidth * scale}px`,
+            }}
+          />
         </div>
       )}
     </div>

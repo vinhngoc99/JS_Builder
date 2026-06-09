@@ -466,6 +466,44 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => { debouncedSaveConnections(connections); }, [connections, debouncedSaveConnections]);
   useEffect(() => { debouncedSaveBrush(brushStrokes); }, [brushStrokes, debouncedSaveBrush]);
 
+  const prevNodePositionsRef = useRef<Record<string, { x: number; y: number }>>({});
+
+  useEffect(() => {
+    const currentPositions: Record<string, { x: number; y: number }> = {};
+    const nodes = elements.filter(el => el.type === 'node');
+    
+    let hasChanges = false;
+    const updates: Record<string, { dx: number; dy: number }> = {};
+    
+    nodes.forEach(node => {
+      currentPositions[node.id] = { x: node.x, y: node.y };
+      const prev = prevNodePositionsRef.current[node.id];
+      if (prev) {
+        const dx = node.x - prev.x;
+        const dy = node.y - prev.y;
+        if (dx !== 0 || dy !== 0) {
+          updates[node.id] = { dx, dy };
+          hasChanges = true;
+        }
+      }
+    });
+    
+    if (hasChanges) {
+      setBrushStrokes(prevStrokes => prevStrokes.map(stroke => {
+        if (stroke.attachedNodeId && updates[stroke.attachedNodeId]) {
+          const { dx, dy } = updates[stroke.attachedNodeId];
+          return {
+            ...stroke,
+            points: stroke.points.map(p => ({ x: p.x + dx, y: p.y + dy }))
+          };
+        }
+        return stroke;
+      }));
+    }
+    
+    prevNodePositionsRef.current = currentPositions;
+  }, [elements]);
+
   const lastActiveVariantIdRef = useRef(activeVariantId);
 
   useEffect(() => {
@@ -851,7 +889,26 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (selectedConnectionId === id) setSelectedConnectionId(null);
   };
 
-  const addBrushStroke = (stroke: BrushStroke) => { saveHistory(); setBrushStrokes(prev => [...prev, stroke]); };
+  const addBrushStroke = (stroke: BrushStroke) => {
+    saveHistory();
+    const nodes = elementsRef.current.filter(el => el.type === 'node');
+    let attachedNodeId: string | null = null;
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const node = nodes[i];
+      const intersects = stroke.points.some(p =>
+        p.x >= node.x &&
+        p.x <= node.x + node.width &&
+        p.y >= node.y &&
+        p.y <= node.y + node.height
+      );
+      if (intersects) {
+        attachedNodeId = node.id;
+        break;
+      }
+    }
+    const updatedStroke = { ...stroke, attachedNodeId };
+    setBrushStrokes(prev => [...prev, updatedStroke]);
+  };
   const clearBrush = () => { saveHistory(); setBrushStrokes([]); };
   const setBrushMode = (enabled: boolean) => {
     setIsBrushMode(enabled);
@@ -1040,12 +1097,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           const arrows: Record<string, string> = { top: '\u25b2', bottom: '\u25bc', left: '\u25c0', right: '\u25b6' };
           for (const [side, conns] of Object.entries(groups)) {
             if (conns.length === 0) continue;
-            const btns = conns.map(c => {
-              const lbl = c.label ? escapeHtml(c.interactiveBtnText || 'YES') : arrows[side];
-              const btnClass = 'conn-btn';
-              return '<button class="' + btnClass + '" data-target="' + c.toId + '" onclick="event.stopPropagation(); toggleOneTarget(this, \'' + c.toId + '\', \'' + el.id + '\')">' + lbl + '</button>';
-            }).join('');
-            expandBtnHTML += '<div class="conn-btn-group ' + side + '">' + btns + '</div>';
+            const targetIdsStr = conns.map(c => c.toId).join(',');
+            const labelTexts = conns.map(c => c.interactiveBtnText || (c.label ? 'YES' : '')).filter(Boolean);
+            const lbl = labelTexts.length > 0 ? escapeHtml(labelTexts.join(' / ')) : arrows[side];
+            const btnClass = 'conn-btn';
+            const btn = '<button class="' + btnClass + '" data-targets="' + targetIdsStr + '" onclick="event.stopPropagation(); toggleMultipleTargets(this, \'' + targetIdsStr + '\', \'' + el.id + '\')">' + lbl + '</button>';
+            expandBtnHTML += '<div class="conn-btn-group ' + side + '">' + btn + '</div>';
           }
         }
       }
@@ -1065,7 +1122,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       switch (el.type) {
         case 'text': {
           const safeText = sanitizeHTML(el.text);
-          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; display: flex; align-items: center; justify-content: center; padding: 8px; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word;">${safeText}</div></div>`;
+          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; display: flex; align-items: center; justify-content: center; padding: 10px 14px; line-height: 1.5; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeText}</div></div>`;
           break;
         }
         case 'button': {
@@ -1074,33 +1131,34 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           const action = el.actionType;
           const target = el.actionTarget;
           
+          const check = "if(window.blockClick){window.blockClick=false;event?.preventDefault();return;}";
           if (action === 'alert') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="event.stopPropagation(); showNotification('${safeTarget}')"`;
+            onClickAttr = `onclick="${check} event.stopPropagation(); showNotification('${safeTarget}')"`;
           } else if (action === 'link') {
             const safeLink = escapeHtml(el.link);
-            onClickAttr = `href="${safeLink}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();"`;
+            onClickAttr = `href="${safeLink}" target="_blank" rel="noopener noreferrer" onclick="${check} event.stopPropagation();"`;
           } else if (action === 'toggleDisabled') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="event.stopPropagation(); toggleDisabled('${safeTarget}')"`;
+            onClickAttr = `onclick="${check} event.stopPropagation(); toggleDisabled('${safeTarget}')"`;
           } else if (action === 'toggleVisibility') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="event.stopPropagation(); toggleVisibility('${safeTarget}')"`;
+            onClickAttr = `onclick="${check} event.stopPropagation(); toggleVisibility('${safeTarget}')"`;
           } else if (action === 'triggerFlow') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="event.stopPropagation(); triggerFlow('${safeTarget}')"`;
+            onClickAttr = `onclick="${check} event.stopPropagation(); triggerFlow('${safeTarget}')"`;
           } else if (action === 'nextSlide') {
-            onClickAttr = `onclick="event.stopPropagation(); nextSlide()"`;
+            onClickAttr = `onclick="${check} event.stopPropagation(); nextSlide()"`;
           } else if (action === 'prevSlide') {
-            onClickAttr = `onclick="event.stopPropagation(); prevSlide()"`;
+            onClickAttr = `onclick="${check} event.stopPropagation(); prevSlide()"`;
           } else if (action === 'goToSlide') {
             const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="event.stopPropagation(); goToSlideById('${safeTarget}')"`;
+            onClickAttr = `onclick="${check} event.stopPropagation(); goToSlideById('${safeTarget}')"`;
           }
           
           const tag = action === 'link' ? 'a' : 'button';
           const buttonDisabledAttr = (action !== 'link' && el.isDisabled) ? 'disabled' : '';
-          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${getAdaptedTextColor(el.color)}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px; padding: 4px; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word;">${safeButtonText}</div></${tag}>`;
+          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${getAdaptedTextColor(el.color)}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px; padding: 8px 14px; line-height: 1.5; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeButtonText}</div></${tag}>`;
           break;
         }
         case 'image': {
@@ -1170,10 +1228,14 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       ) : '';
       const markerStartAttr = conn.startArrow === 'arrow' ? 'marker-start="url(#arrow)"' : '';
       const markerEndAttr = conn.endArrow === 'arrow' ? 'marker-end="url(#arrow)"' : '';
-      return `<g id="conn-group-${conn.id}" class="connection-group" data-id="${conn.id}" data-from="${conn.fromId}" data-to="${conn.toId}" data-label="${escapeHtml(conn.label || '')}" data-align="${conn.labelAlignment || 'horizontal'}" style="cursor: pointer; transition: opacity 0.4s ease; ${isHidden ? 'opacity: 0;' : ''}"><path id="conn-${conn.id}" fill="none" stroke="#6c6d80" stroke-width="2" ${markerStartAttr} ${markerEndAttr} /><path id="conn-hit-${conn.id}" stroke="transparent" stroke-width="20" fill="none" />${labelHTML}</g>`;
+      return `<g id="conn-group-${conn.id}" class="connection-group ${isHidden ? 'is-hidden' : ''}" data-id="${conn.id}" data-from="${conn.fromId}" data-to="${conn.toId}" data-label="${escapeHtml(conn.label || '')}" data-align="${conn.labelAlignment || 'horizontal'}" style="cursor: pointer; transition: opacity 0.4s ease; opacity: 0;"><path id="conn-${conn.id}" fill="none" stroke="#6c6d80" stroke-width="2" ${markerStartAttr} ${markerEndAttr} /><path id="conn-pulse-${conn.id}" class="flow-pulse-path" fill="none" stroke="${conn.color || '#4c5fd7'}" stroke-width="2" stroke-linecap="round" /><path id="conn-hit-${conn.id}" stroke="transparent" stroke-width="20" fill="none" />${labelHTML}</g>`;
     }).join('\n');
 
-    const brushPaths = brushStrokes.map(s => `<path d="${s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none" />`).join('\n');
+    const brushPaths = brushStrokes.map(s => {
+      const isHidden = s.attachedNodeId && (hiddenNodes.has(s.attachedNodeId) || elementsMap.get(s.attachedNodeId)?.isHidden);
+      const styleAttr = isHidden ? 'style="opacity: 0; pointer-events: none; transition: opacity 0.4s ease;"' : 'style="transition: opacity 0.4s ease;"';
+      return `<path d="${s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none" ${s.attachedNodeId ? `data-attached-node-id="${s.attachedNodeId}"` : ''} ${styleAttr} />`;
+    }).join('\n');
     const rootElements = elements.filter(el => !el.parentId).map(el => buildElementHTML(el)).join('\n');
 
     return `
@@ -1323,9 +1385,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         .wire-undraw path:first-child { stroke-dasharray: var(--wire-len); stroke-dashoffset: 0; animation: wireUndraw 0.2s ease-in forwards; }
         @keyframes wireDraw { to { stroke-dashoffset: 0; } }
         @keyframes wireUndraw { to { stroke-dashoffset: var(--wire-len); } }
-        #interactive-container.space-down { cursor: grab; }
-        #interactive-container.panning { cursor: grabbing; }
-        #interactive-container.brush-mode { cursor: crosshair !important; }
+        #interactive-container.space-down, #interactive-container.space-down * { cursor: grab !important; }
+        #interactive-container.panning, #interactive-container.panning * { cursor: grabbing !important; }
+        #interactive-container.brush-mode, #interactive-container.brush-mode * { cursor: none !important; }
         .laser-cursor-none, .laser-cursor-none * {
           cursor: none !important;
         }
@@ -1341,6 +1403,41 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           z-index: 100001;
           display: none;
         }
+        .brush-custom-cursor {
+          position: fixed;
+          pointer-events: none;
+          z-index: 100002;
+          transform: translate(-50%, -50%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .brush-custom-cursor-circle {
+          border: 1px solid #ffffff;
+          border-radius: 50%;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: absolute;
+          box-shadow: 0 0 0 1px #000000;
+        }
+        .flow-pulse-path {
+          stroke-dasharray: 6 18;
+          animation: flowPulse 1.2s linear infinite;
+          opacity: 0;
+          transition: opacity 0.5s ease;
+          pointer-events: none;
+        }
+        .flow-active .flow-pulse-path {
+          opacity: 0.8;
+        }
+        @keyframes flowPulse {
+          to {
+            stroke-dashoffset: -24;
+          }
+        }
+        #reset-layout:hover { background: #ff2a76 !important; transform: scale(1.05); }
       </style>
       ${fontLinkTags}
       <button class="theme-toggle-btn" id="present-btn" onclick="startPresentation()" title="Present Slideshow" style="right: 74px; display: flex; align-items: center; justify-content: center;">
@@ -1366,7 +1463,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       </div>
       <div class="brush-toolbar">
         <button id="brush-toggle" class="btn-tool" title="Brush (B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
-        <button id="brush-clear" class="btn-tool" title="Clear (X)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.9-9.9c1-1 2.5-1 3.4 0l4.3 4.3c1 1 1 2.5 0 3.4L10.5 21c-1 1-2.5 1-3.4 0Z"/><path d="m11 6 4 4"/></svg></button>
+        <button id="eraser-toggle" class="btn-tool" title="Eraser (E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.9-9.9c1-1 2.5-1 3.4 0l4.3 4.3c1 1 1 2.5 0 3.4L10.5 21c-1 1-2.5 1-3.4 0Z"/><path d="m11 6 4 4"/></svg></button>
+        <button id="brush-clear" class="btn-tool" title="Clear (X)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <button id="undo-btn" class="btn-tool" title="Undo (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
         <button id="redo-btn" class="btn-tool" title="Redo (Ctrl+Y)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
@@ -1391,12 +1489,17 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <div style="width: 1px; background: var(--border-color); height: 20px;"></div>
         <button class="conn-btn" onclick="exitPresentation()" tabindex="-1" style="background: #ef5350; border-radius: 12px; padding: 6px 16px; border: none; font-size: 13px; cursor: pointer; color: #fff; font-weight: 600;">Exit</button>
       </div>
-      <div class="zoom-controls"><span id="zoom-percent" style="font-weight:700; min-width: 50px; text-align: center; font-size: 16px;">100%</span><button class="btn-fit" id="zoom-fit">Fit in view</button></div>
+      <div class="zoom-controls"><span id="zoom-percent" style="font-weight:700; min-width: 50px; text-align: center; font-size: 16px;">100%</span><button class="btn-fit" id="zoom-fit" style="margin-right: 5px;">Fit in view</button><button class="btn-fit" id="reset-layout" style="background: #e91e63; box-shadow: 0 4px 12px rgba(233, 30, 99, 0.3);">Reset Position</button></div>
       <div id="notification-toast" class="notification-toast"><div class="notification-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><span id="notification-text"></span></div>
       
       <!-- Exported Laser Pointer Elements -->
       <div id="laser-pointer-el" class="laser-pointer"></div>
       <svg id="laser-trail-svg" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 100000; overflow: visible; display: none;"></svg>
+
+      <!-- Exported Custom Brush Cursor Element -->
+      <div id="brush-cursor-el" class="brush-custom-cursor" style="display: none; left: -100px; top: -100px;">
+        <div id="brush-cursor-circle" class="brush-custom-cursor-circle"></div>
+      </div>
       <script>
         (function() {
           window.toggleTheme = () => {
@@ -1421,8 +1524,109 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           const brushLayer = document.getElementById('brush-layer');
           let elements = ${JSON.stringify(elements)};
           const connections = ${JSON.stringify(connections)};
-          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 };
+          const originalElements = JSON.parse(JSON.stringify(elements));
+          const originalEditBrushHTML = document.getElementById('edit-brush-layer') ? document.getElementById('edit-brush-layer').innerHTML : '';
+          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null;
           let isLaserActive = false, laserPos = { x: -100, y: -100 }, laserTrail = [];
+
+          const brushCursorEl = document.getElementById('brush-cursor-el');
+          const brushCursorCircle = document.getElementById('brush-cursor-circle');
+
+          function updateBrushCursor(e) {
+            if (!brushCursorEl) return;
+            if (isBrushMode && !isSpaceDown) {
+              brushCursorEl.style.display = 'flex';
+              if (e) {
+                brushCursorEl.style.left = e.clientX + 'px';
+                brushCursorEl.style.top = e.clientY + 'px';
+              }
+              const currentWidth = parseFloat(document.getElementById('brush-width-slider')?.value || '4');
+              const size = currentWidth * scale;
+              if (brushCursorCircle) {
+                brushCursorCircle.style.width = size + 'px';
+                brushCursorCircle.style.height = size + 'px';
+              }
+            } else {
+              brushCursorEl.style.display = 'none';
+            }
+          }
+
+          function getDistanceToSegment(p, a, b) {
+            const l2 = Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2);
+            if (l2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+            let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            const projX = a.x + t * (b.x - a.x);
+            const projY = a.y + t * (b.y - a.y);
+            return Math.hypot(p.x - projX, p.y - projY);
+          }
+
+          function eraseBrushStrokesAt(currentPos, lastPos, radius) {
+            const paths = Array.from(document.querySelectorAll('#edit-brush-layer path, #brush-layer path'));
+            paths.forEach(path => {
+              const ptsStr = path.dataset.pts || path.getAttribute('d')?.replace(/[ML]/g, '').trim();
+              if (!ptsStr) return;
+              
+              const pts = ptsStr.split(/[,\s]+/).map(parseFloat);
+              const points = [];
+              for (let i = 0; i < pts.length; i += 2) {
+                if (!isNaN(pts[i]) && !isNaN(pts[i+1])) {
+                  points.push({ x: pts[i], y: pts[i+1] });
+                }
+              }
+
+              let changed = false;
+              let currentPoints = [];
+              const newSubPaths = [];
+              const strokeWidth = parseFloat(path.getAttribute('stroke-width') || '4');
+
+              points.forEach(p => {
+                const dist = lastPos 
+                  ? getDistanceToSegment(p, lastPos, currentPos)
+                  : Math.hypot(p.x - currentPos.x, p.y - currentPos.y);
+                
+                const threshold = radius + strokeWidth / 2;
+                if (dist <= threshold) {
+                  if (currentPoints.length > 1) {
+                    newSubPaths.push(currentPoints);
+                  }
+                  currentPoints = [];
+                  changed = true;
+                } else {
+                  currentPoints.push(p);
+                }
+              });
+
+              if (currentPoints.length > 1) {
+                newSubPaths.push(currentPoints);
+              }
+
+              if (changed) {
+                const parent = path.parentNode;
+                newSubPaths.forEach(subPts => {
+                  const newPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                  newPath.setAttribute('fill', 'none');
+                  newPath.setAttribute('stroke', path.getAttribute('stroke'));
+                  newPath.setAttribute('stroke-width', path.getAttribute('stroke-width'));
+                  newPath.setAttribute('stroke-linecap', 'round');
+                  newPath.setAttribute('stroke-linejoin', 'round');
+                  const dVal = subPts.map((pt, idx) => (idx === 0 ? 'M ' : 'L ') + pt.x + ' ' + pt.y).join(' ');
+                  newPath.setAttribute('d', dVal);
+                  newPath.dataset.pts = subPts.map(pt => pt.x + ',' + pt.y).join(' ');
+                  
+                  const attachedNodeId = path.dataset.attachedNodeId || path.getAttribute('data-attached-node-id');
+                  if (attachedNodeId) {
+                    newPath.setAttribute('data-attached-node-id', attachedNodeId);
+                    newPath.dataset.attachedNodeId = attachedNodeId;
+                    newPath.style.transition = 'opacity 0.4s ease';
+                    newPath.style.opacity = path.style.opacity;
+                  }
+                  parent.appendChild(newPath);
+                });
+                path.remove();
+              }
+            });
+          }
           
           let history = [], redoStack = [];
           function saveHistory() { history.push(brushLayer.innerHTML); redoStack = []; if(history.length > 50) history.shift(); }
@@ -1432,7 +1636,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           function updateAllElements() {
             elements.forEach(el => {
               const wrapper = document.getElementById('el-wrapper-' + el.id);
-              if(wrapper) { wrapper.style.left = el.x + 'px'; wrapper.style.top = el.y + 'px'; }
+              if(wrapper) {
+                const isFillParent = el.parentId && el.fillParent;
+                wrapper.style.left = isFillParent ? '0px' : el.x + 'px';
+                wrapper.style.top = isFillParent ? '0px' : el.y + 'px';
+              }
             });
           }
 
@@ -1443,11 +1651,34 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             setTimeout(() => toast.classList.remove('show'), 3000);
           };
 
-          const toggleBrush = () => {
-            isBrushMode = !isBrushMode;
-            document.getElementById('brush-toggle').classList.toggle('primary', isBrushMode);
+          function updateBrushToolClasses() {
+            document.getElementById('brush-toggle').classList.toggle('primary', isBrushMode && brushTool === 'draw');
+            const eraserBtn = document.getElementById('eraser-toggle');
+            if (eraserBtn) eraserBtn.classList.toggle('primary', isBrushMode && brushTool === 'erase');
             container.classList.toggle('brush-mode', isBrushMode);
+            updateBrushCursor();
+          }
+
+          const toggleBrush = () => {
+            if (isBrushMode && brushTool === 'draw') {
+              isBrushMode = false;
+            } else {
+              isBrushMode = true;
+              brushTool = 'draw';
+            }
+            updateBrushToolClasses();
             showNotification(isBrushMode ? 'Brush mode enabled' : 'Brush mode disabled');
+          };
+
+          const toggleEraser = () => {
+            if (isBrushMode && brushTool === 'erase') {
+              isBrushMode = false;
+            } else {
+              isBrushMode = true;
+              brushTool = 'erase';
+            }
+            updateBrushToolClasses();
+            showNotification(isBrushMode ? 'Eraser mode enabled' : 'Eraser mode disabled');
           };
 
           const clearBrush = () => { saveHistory(); brushLayer.innerHTML = ''; showNotification('Drawings cleared'); };
@@ -1463,17 +1694,37 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           };
 
           document.getElementById('brush-toggle').onclick = toggleBrush;
+          const eraserToggle = document.getElementById('eraser-toggle');
+          if (eraserToggle) eraserToggle.onclick = toggleEraser;
           document.getElementById('brush-clear').onclick = clearBrush;
           document.getElementById('undo-btn').onclick = undo;
           document.getElementById('redo-btn').onclick = redo;
           document.getElementById('brush-hide').onclick = toggleToolbarVisibility;
           document.getElementById('brush-show-btn').onclick = toggleToolbarVisibility;
+
+          const resetBtn = document.getElementById('reset-layout');
+          if (resetBtn) {
+            resetBtn.onclick = () => {
+              elements = JSON.parse(JSON.stringify(originalElements));
+              updateAllElements();
+              resetVisibilities();
+              updateConnections();
+              if (document.getElementById('edit-brush-layer')) {
+                document.getElementById('edit-brush-layer').innerHTML = originalEditBrushHTML;
+              }
+              brushLayer.innerHTML = '';
+              document.getElementById('zoom-fit').click();
+              showNotification('Positions and state reset');
+              setTimeout(animateInitialConnections, 200);
+            };
+          }
           
           const widthSlider = document.getElementById('brush-width-slider');
           const widthVal = document.getElementById('brush-width-val');
           if (widthSlider && widthVal) {
             widthSlider.oninput = () => {
               widthVal.innerText = widthSlider.value;
+              updateBrushCursor();
             };
           }
 
@@ -1607,14 +1858,35 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               }
               return;
             }
-            if (e.code === 'Space' && !isInput) { e.preventDefault(); isSpaceDown = true; container.classList.add('space-down'); }
-            if (e.key.toLowerCase() === 'b' && !isInput) toggleBrush();
+            if (e.code === 'Space' && !isInput) { e.preventDefault(); isSpaceDown = true; container.classList.add('space-down'); updateBrushCursor(); }
+            if (e.key.toLowerCase() === 'b' && !isInput) {
+              e.preventDefault();
+              if (isBrushMode && brushTool === 'draw') {
+                isBrushMode = false;
+              } else {
+                isBrushMode = true;
+                brushTool = 'draw';
+              }
+              updateBrushToolClasses();
+              showNotification(isBrushMode ? 'Brush mode enabled' : 'Brush mode disabled');
+            }
+            if (e.key.toLowerCase() === 'e' && !isInput) {
+              e.preventDefault();
+              if (isBrushMode && brushTool === 'erase') {
+                isBrushMode = false;
+              } else {
+                isBrushMode = true;
+                brushTool = 'erase';
+              }
+              updateBrushToolClasses();
+              showNotification(isBrushMode ? 'Eraser mode enabled' : 'Eraser mode disabled');
+            }
             if (e.key.toLowerCase() === 'x' && !isInput) clearBrush();
             if (e.key.toLowerCase() === 'h' && !isInput) { e.preventDefault(); toggleToolbarVisibility(); }
             if (e.ctrlKey && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
             if (e.ctrlKey && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
           };
-          window.onkeyup = e => { if (e.code === 'Space') { isSpaceDown = false; isPanning = false; container.classList.remove('space-down', 'panning'); }};
+          window.onkeyup = e => { if (e.code === 'Space') { isSpaceDown = false; isPanning = false; container.classList.remove('space-down', 'panning'); updateBrushCursor(); }};
 
           // Laser pointer and trail logic inside exported HTML
           const laserEl = document.getElementById('laser-pointer-el');
@@ -1685,6 +1957,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             connGroup.classList.remove('wire-draw', 'wire-undraw');
             void connGroup.offsetWidth; // force reflow
             if (show) {
+              connGroup.classList.remove('is-hidden');
               connGroup.style.opacity = '1';
               connGroup.classList.add('wire-draw');
               connGroup.addEventListener('animationend', function h() {
@@ -1696,7 +1969,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               connGroup.classList.add('wire-undraw');
               connGroup.addEventListener('animationend', function h() {
                 connGroup.removeEventListener('animationend', h);
-                // Do not remove wire-undraw to prevent the path from snapping back to fully drawn during transition
+                connGroup.classList.add('is-hidden');
               }, {once: true});
             }
           }
@@ -1726,6 +1999,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             el.style.pointerEvents = 'auto';
             el.classList.add('flow-reveal');
 
+            document.querySelectorAll('path[data-attached-node-id="' + id + '"]').forEach(path => {
+              path.style.opacity = '1';
+              path.style.pointerEvents = 'auto';
+            });
+
             const elData = elements.find(e => e.id === id);
             if (elData && elData.enableExpandButton) {
               return;
@@ -1739,22 +2017,30 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             });
           }
 
-          window.toggleOneTarget = function(btn, targetId, fromId) {
+          window.toggleMultipleTargets = function(btn, targetIdsStr, fromId) {
+            const targetIds = targetIdsStr.split(',');
             const isShowing = btn.classList.toggle('active');
-            let connGroup = null;
-            document.querySelectorAll('.connection-group').forEach(cg => {
-              if (cg.dataset.from === fromId && cg.dataset.to === targetId) {
-                connGroup = cg;
+            
+            targetIds.forEach(targetId => {
+              let connGroup = null;
+              document.querySelectorAll('.connection-group').forEach(cg => {
+                if (cg.dataset.from === fromId && cg.dataset.to === targetId) {
+                  connGroup = cg;
+                }
+              });
+
+              if (isShowing) {
+                if (connGroup) animateWire(connGroup, true);
+                revealCascade(targetId);
+              } else {
+                if (connGroup) animateWire(connGroup, false);
+                hideCascade(targetId);
               }
             });
 
             if (isShowing) {
-              if (connGroup) animateWire(connGroup, true);
-              revealCascade(targetId);
               btn.classList.add('clicked-hidden');
             } else {
-              if (connGroup) animateWire(connGroup, false);
-              hideCascade(targetId);
               btn.classList.remove('clicked-hidden');
             }
           };
@@ -1768,6 +2054,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             el.classList.remove('flow-reveal');
             el.classList.add('flow-hide');
             el.style.pointerEvents = 'none';
+
+            document.querySelectorAll('path[data-attached-node-id="' + id + '"]').forEach(path => {
+              path.style.opacity = '0';
+              path.style.pointerEvents = 'none';
+            });
             
             el.addEventListener('animationend', function h() {
               el.removeEventListener('animationend', h);
@@ -1806,7 +2097,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
           window.toggleVisibility = function(id) {
             const el = document.getElementById('el-wrapper-' + id); if (!el) return;
-            el.classList.toggle('is-hidden');
+            const isHidden = el.classList.toggle('is-hidden');
+            document.querySelectorAll('path[data-attached-node-id="' + id + '"]').forEach(path => {
+              path.style.opacity = isHidden ? '0' : '1';
+              path.style.pointerEvents = isHidden ? 'none' : 'auto';
+            });
           };
 
           window.triggerFlow = function(id) {
@@ -1838,6 +2133,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             // Adjust interactive button scale when zoomed out
             const btnScale = scale < 1 ? 1 / scale : 1;
             container.style.setProperty('--conn-btn-scale', btnScale + '');
+            updateBrushCursor();
           }
 
           container.onwheel = e => {
@@ -1852,31 +2148,48 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (isBrushMode) {
               const r = container.getBoundingClientRect();
               const x = (e.clientX - r.left - pan.x) / scale, y = (e.clientY - r.top - pan.y) / scale;
-              currentStroke = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-              currentStroke.setAttribute('fill', 'none');
-              currentStroke.setAttribute('stroke', document.getElementById('brush-color').value);
-              const brushWidthVal = document.getElementById('brush-width-slider') ? document.getElementById('brush-width-slider').value : '4';
-              currentStroke.setAttribute('stroke-width', brushWidthVal);
-              currentStroke.setAttribute('stroke-linecap', 'round');
-              currentStroke.setAttribute('stroke-linejoin', 'round');
-              currentStroke.dataset.pts = x + ',' + y;
-              brushLayer.appendChild(currentStroke);
+              if (brushTool === 'erase') {
+                isErasing = true;
+                lastEraserPos = { x, y };
+                const brushWidthVal = parseFloat(document.getElementById('brush-width-slider')?.value || '4');
+                eraseBrushStrokesAt({ x, y }, null, brushWidthVal / 2);
+              } else {
+                currentStroke = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                currentStroke.setAttribute('fill', 'none');
+                currentStroke.setAttribute('stroke', document.getElementById('brush-color').value);
+                const brushWidthVal = document.getElementById('brush-width-slider') ? document.getElementById('brush-width-slider').value : '4';
+                currentStroke.setAttribute('stroke-width', brushWidthVal);
+                currentStroke.setAttribute('stroke-linecap', 'round');
+                currentStroke.setAttribute('stroke-linejoin', 'round');
+                currentStroke.dataset.pts = x + ',' + y;
+                brushLayer.appendChild(currentStroke);
+              }
               return;
             }
-            if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input') || e.target.closest('select') || e.target.closest('textarea') || e.target.closest('.conn-btn-group') || e.target.closest('.conn-btn')) {
+            window.blockClick = false;
+            if (e.target.closest('.brush-toolbar') || e.target.closest('#presentation-bar') || e.target.closest('.theme-toggle-btn') || e.target.closest('.zoom-controls') || e.target.closest('.conn-btn-group') || e.target.closest('.conn-btn')) {
               return;
             }
-             const el = e.target.closest('.draggable-element');
-             if (el) {
-               activeDrag = el;
-               startDrag = { x: e.clientX, y: e.clientY, ex: parseFloat(el.style.left), ey: parseFloat(el.style.top) };
-               el.style.zIndex = 2000;
-               e.stopPropagation();
-             }
+            const el = e.target.closest('.draggable-element');
+            if (el) {
+              activeDrag = el;
+              startDrag = { x: e.clientX, y: e.clientY, ex: parseFloat(el.style.left), ey: parseFloat(el.style.top) };
+              el.style.zIndex = 2000;
+              e.stopPropagation();
+            }
           }, false);
 
           window.addEventListener('pointermove', e => {
+            updateBrushCursor(e);
             if (isPanning) { pan.x = startPan.px + (e.clientX - startPan.x); pan.y = startPan.py + (e.clientY - startPan.y); updateTransform(); return; }
+            if (isErasing) {
+              const r = container.getBoundingClientRect();
+              const x = (e.clientX - r.left - pan.x) / scale, y = (e.clientY - r.top - pan.y) / scale;
+              const brushWidthVal = parseFloat(document.getElementById('brush-width-slider')?.value || '4');
+              eraseBrushStrokesAt({ x, y }, lastEraserPos, brushWidthVal / 2);
+              lastEraserPos = { x, y };
+              return;
+            }
             if (currentStroke) {
               const r = container.getBoundingClientRect();
               const x = (e.clientX - r.left - pan.x) / scale, y = (e.clientY - r.top - pan.y) / scale;
@@ -1884,16 +2197,90 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               currentStroke.setAttribute('d', 'M ' + currentStroke.dataset.pts.split(' ').map(p => p.replace(',', ' ')).join(' L '));
             }
             if (activeDrag) {
+              const totalMove = Math.hypot(e.clientX - startDrag.x, e.clientY - startDrag.y);
+              if (totalMove > 5) {
+                window.blockClick = true;
+              }
               const dx = (e.clientX - startDrag.x) / scale, dy = (e.clientY - startDrag.y) / scale;
               const newX = startDrag.ex + dx, newY = startDrag.ey + dy;
               activeDrag.style.left = newX + 'px'; activeDrag.style.top = newY + 'px';
               const id = activeDrag.id.replace('el-wrapper-', '');
-              const elData = elements.find(el => el.id === id); if(elData) { elData.x = newX; elData.y = newY; }
+              const elData = elements.find(el => el.id === id);
+              if (elData) {
+                const diffX = newX - elData.x;
+                const diffY = newY - elData.y;
+                elData.x = newX;
+                elData.y = newY;
+                if (elData.type === 'node' && (diffX !== 0 || diffY !== 0)) {
+                  const paths = document.querySelectorAll('path[data-attached-node-id="' + id + '"]');
+                  paths.forEach(path => {
+                    const ptsStr = path.dataset.pts || '';
+                    if (ptsStr) {
+                      const updatedPts = ptsStr.split(' ').map(pt => {
+                        const [px, py] = pt.split(',').map(parseFloat);
+                        return (px + diffX) + ',' + (py + diffY);
+                      }).join(' ');
+                      path.dataset.pts = updatedPts;
+                      path.setAttribute('d', 'M ' + updatedPts.split(' ').map(p => p.replace(',', ' ')).join(' L '));
+                    } else {
+                      const dAttr = path.getAttribute('d') || '';
+                      const tokens = dAttr.trim().split(/[\s,]+/);
+                      let updatedD = '';
+                      for (let i = 0; i < tokens.length; i++) {
+                        const token = tokens[i];
+                        if (token === 'M' || token === 'L') {
+                          const px = parseFloat(tokens[i+1]) + diffX;
+                          const py = parseFloat(tokens[i+2]) + diffY;
+                          updatedD += (updatedD ? ' ' : '') + token + ' ' + px + ' ' + py;
+                          i += 2;
+                        }
+                      }
+                      path.setAttribute('d', updatedD);
+                    }
+                  });
+                }
+              }
               requestAnimationFrame(updateConnections);
             }
           });
 
-          window.addEventListener('pointerup', () => { if(currentStroke) saveHistory(); currentStroke = null; isPanning = false; container.classList.remove('panning'); if(activeDrag) { activeDrag.style.zIndex = activeDrag.classList.contains('is-node') ? 1 : 2; activeDrag = null; } });
+          window.addEventListener('pointerup', () => {
+            if (currentStroke) {
+              const ptsStr = currentStroke.dataset.pts || '';
+              const pts = ptsStr.split(' ').map(pt => {
+                const [x, y] = pt.split(',').map(parseFloat);
+                return { x, y };
+              });
+              const nodes = elements.filter(el => el.type === 'node');
+              let attachedNodeId = null;
+              for (let i = nodes.length - 1; i >= 0; i--) {
+                const node = nodes[i];
+                const intersects = pts.some(p =>
+                  p.x >= node.x &&
+                  p.x <= node.x + node.width &&
+                  p.y >= node.y &&
+                  p.y <= node.y + node.height
+                );
+                if (intersects) {
+                  attachedNodeId = node.id;
+                  break;
+                }
+              }
+              if (attachedNodeId) {
+                currentStroke.setAttribute('data-attached-node-id', attachedNodeId);
+              }
+              saveHistory();
+            }
+            currentStroke = null;
+            isErasing = false;
+            lastEraserPos = null;
+            isPanning = false;
+            container.classList.remove('panning');
+            if (activeDrag) {
+              activeDrag.style.zIndex = activeDrag.classList.contains('is-node') ? 1 : 2;
+              activeDrag = null;
+            }
+          });
 
           document.getElementById('zoom-fit').onclick = () => {
             const rootEls = elements.filter(el => !el.parentId);
@@ -1941,6 +2328,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               if (conn.fromPort === 'top') cy1 -= cd; else if (conn.fromPort === 'bottom') cy1 += cd; else if (conn.fromPort === 'left') cx1 -= cd; else cx1 += cd;
               if (conn.toPort === 'top') cy2 -= cd; else if (conn.toPort === 'bottom') cy2 += cd; else if (conn.toPort === 'left') cx2 -= cd; else cx2 += cd;
               path.setAttribute('d', 'M ' + s.x + ' ' + s.y + ' C ' + cx1 + ' ' + cy1 + ', ' + cx2 + ' ' + cy2 + ', ' + e.x + ' ' + e.y);
+              const pulsePath = document.getElementById('conn-pulse-' + conn.id);
+              if (pulsePath) {
+                pulsePath.setAttribute('d', 'M ' + s.x + ' ' + s.y + ' C ' + cx1 + ' ' + cy1 + ', ' + cx2 + ' ' + cy2 + ', ' + e.x + ' ' + e.y);
+              }
               const helperPath = document.getElementById('conn-text-' + conn.id);
               if (helperPath) {
                 helperPath.setAttribute('d', 'M ' + e.x + ' ' + e.y + ' C ' + cx2 + ' ' + cy2 + ', ' + cx1 + ' ' + cy1 + ', ' + s.x + ' ' + s.y);
@@ -1967,7 +2358,110 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               }
             });
           }
+          function animateInitialConnections() {
+            document.querySelectorAll('.connection-group').forEach(cg => {
+              const toId = cg.dataset.to;
+              const toEl = document.getElementById('el-wrapper-' + toId);
+              const fromId = cg.dataset.from;
+              const fromEl = document.getElementById('el-wrapper-' + fromId);
+              
+              const isFromHidden = fromEl && fromEl.classList.contains('is-hidden');
+              const isToHidden = toEl && toEl.classList.contains('is-hidden');
+              
+              if (!cg.classList.contains('is-hidden') && !isFromHidden && !isToHidden) {
+                animateWire(cg, true);
+              } else {
+                cg.style.opacity = '0';
+              }
+            });
+          }
+
+          function resetVisibilities() {
+            elements.forEach(el => {
+              const wrapper = document.getElementById('el-wrapper-' + el.id);
+              if (wrapper) {
+                wrapper.classList.remove('flow-reveal', 'flow-hide', 'show-btns');
+                wrapper.style.filter = '';
+                
+                const isInteractiveHidden = ${JSON.stringify(Array.from(hiddenNodes))}.includes(el.id);
+                if (isInteractiveHidden) {
+                  wrapper.classList.add('is-hidden');
+                  wrapper.style.opacity = '0';
+                  wrapper.style.pointerEvents = 'none';
+                } else if (el.isDisabled) {
+                  wrapper.classList.remove('is-hidden');
+                  wrapper.style.filter = 'grayscale(1) contrast(0.5)';
+                  wrapper.style.opacity = '0.6';
+                  if (el.type !== 'button') wrapper.style.pointerEvents = 'none';
+                  else wrapper.style.pointerEvents = 'auto';
+                } else {
+                  wrapper.classList.remove('is-hidden');
+                  wrapper.style.opacity = '1';
+                  wrapper.style.pointerEvents = 'auto';
+                }
+
+                const btn = wrapper.querySelector('button');
+                if (btn && el.type === 'button') {
+                  btn.disabled = !!el.isDisabled;
+                }
+
+                wrapper.querySelectorAll('.conn-btn').forEach(cb => {
+                  cb.classList.remove('active', 'clicked-hidden');
+                });
+              }
+            });
+
+            document.querySelectorAll('.connection-group').forEach(cg => {
+              cg.classList.remove('flow-active');
+              const connId = cg.dataset.id;
+              const isInitialHidden = ${JSON.stringify(Array.from(hiddenConnections))}.includes(connId);
+              cg.style.opacity = '0';
+              if (isInitialHidden) {
+                cg.classList.add('is-hidden');
+              } else {
+                cg.classList.remove('is-hidden');
+              }
+            });
+          }
+
+          function startPropagationAnimation() {
+            const targetIds = new Set(connections.map(c => c.toId));
+            const rootNodes = elements.filter(el => !el.parentId && !targetIds.has(el.id));
+            const startNodes = rootNodes.length > 0 ? rootNodes : elements.filter(el => !el.parentId);
+            
+            const visitedNodes = new Set();
+            const queue = startNodes.map(n => ({ id: n.id, delay: 0 }));
+            queue.forEach(item => visitedNodes.add(item.id));
+            
+            while (queue.length > 0) {
+              const current = queue.shift();
+              const outConns = connections.filter(c => c.fromId === current.id);
+              outConns.forEach(conn => {
+                const connGroup = document.getElementById('conn-group-' + conn.id);
+                if (connGroup) {
+                  setTimeout(() => {
+                    connGroup.classList.add('flow-active');
+                  }, current.delay);
+                }
+                
+                if (!visitedNodes.has(conn.toId)) {
+                  visitedNodes.add(conn.toId);
+                  queue.push({ id: conn.toId, delay: current.delay + 500 });
+                }
+              });
+            }
+          }
+
           updateTransform(); updateConnections();
+          setTimeout(() => {
+            if (document.getElementById('zoom-fit')) {
+              document.getElementById('zoom-fit').click();
+            }
+          }, 50);
+          setTimeout(() => {
+            animateInitialConnections();
+            startPropagationAnimation();
+          }, 500);
         })();
       </script>
       <script id="js-builder-state" type="application/json">${JSON.stringify({
