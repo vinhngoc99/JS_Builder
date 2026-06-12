@@ -1442,6 +1442,32 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         #reset-layout:hover { background: #ff2a76 !important; transform: scale(1.05); }
       </style>
       ${fontLinkTags}
+      <button class="theme-toggle-btn" id="autoplay-btn" onclick="toggleAutoplay()" title="Auto Play Flow" style="right: 128px; display: flex; align-items: center; justify-content: center; background: #4caf50;">
+        <svg class="play-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        <svg class="pause-icon" style="display:none;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>
+      </button>
+      <button class="theme-toggle-btn" id="autoplay-settings-btn" onclick="toggleAutoplaySettings()" title="Autoplay Settings" style="right: 182px; display: flex; align-items: center; justify-content: center;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+
+      <!-- Autoplay Settings Panel -->
+      <div id="autoplay-settings-panel" style="display: none; position: fixed; top: 74px; right: 128px; background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 10000; font-family: inherit; font-size: 13px; color: var(--text-primary);">
+        <div style="margin-bottom: 10px; font-weight: bold; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+          <span>Autoplay Settings</span>
+          <button onclick="toggleAutoplaySettings()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; font-weight: bold; padding: 0;">&times;</button>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: 600;">Reveal Mode</label>
+          <div style="display: flex; gap: 8px;">
+            <button id="mode-step-btn" onclick="setAutoplayMode('step')" style="flex: 1; padding: 6px; font-size: 11px; background: #3f51b5; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">Step-by-Step</button>
+            <button id="mode-instant-btn" onclick="setAutoplayMode('instant')" style="flex: 1; padding: 6px; font-size: 11px; background: var(--btn-bg); color: var(--text-primary); border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">Instant (All)</button>
+          </div>
+        </div>
+        <div id="delay-settings-container" style="margin-bottom: 4px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: 600;">Step Delay (seconds)</label>
+          <input type="number" id="autoplay-delay-input" min="0.1" max="10.0" step="0.1" value="1.5" style="width: 100%; box-sizing: border-box; padding: 6px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-primary); outline: none; font-size: 13px;" />
+        </div>
+      </div>
       <button class="theme-toggle-btn" id="present-btn" onclick="startPresentation()" title="Present Slideshow" style="right: 74px; display: flex; align-items: center; justify-content: center;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       </button>
@@ -1528,7 +1554,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           const connections = ${JSON.stringify(connections)};
           const originalElements = JSON.parse(JSON.stringify(elements));
           const originalEditBrushHTML = document.getElementById('edit-brush-layer') ? document.getElementById('edit-brush-layer').innerHTML : '';
-          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null;
+          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step';
           let isLaserActive = false, laserPos = { x: -100, y: -100 }, laserTrail = [];
 
           const brushCursorEl = document.getElementById('brush-cursor-el');
@@ -1707,6 +1733,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           const resetBtn = document.getElementById('reset-layout');
           if (resetBtn) {
             resetBtn.onclick = () => {
+              stopAutoplay();
               elements = JSON.parse(JSON.stringify(originalElements));
               updateAllElements();
               resetVisibilities();
@@ -1730,6 +1757,139 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             };
           }
 
+          window.toggleAutoplay = () => {
+            if (isAutoplayActive) {
+              stopAutoplay();
+            } else {
+              startAutoplay();
+            }
+          };
+
+          window.toggleAutoplaySettings = () => {
+            const panel = document.getElementById('autoplay-settings-panel');
+            if (panel) {
+              const isHidden = panel.style.display === 'none';
+              panel.style.display = isHidden ? 'block' : 'none';
+            }
+          };
+
+          window.setAutoplayMode = (mode) => {
+            autoplayMode = mode;
+            const stepBtn = document.getElementById('mode-step-btn');
+            const instBtn = document.getElementById('mode-instant-btn');
+            const delayCont = document.getElementById('delay-settings-container');
+            
+            if (stepBtn && instBtn) {
+              if (mode === 'step') {
+                stepBtn.style.background = '#3f51b5';
+                stepBtn.style.color = '#fff';
+                instBtn.style.background = 'var(--btn-bg)';
+                instBtn.style.color = 'var(--text-primary)';
+                if (delayCont) delayCont.style.display = 'block';
+              } else {
+                instBtn.style.background = '#3f51b5';
+                instBtn.style.color = '#fff';
+                stepBtn.style.background = 'var(--btn-bg)';
+                stepBtn.style.color = 'var(--text-primary)';
+                if (delayCont) delayCont.style.display = 'none';
+              }
+            }
+          };
+
+          function startAutoplay() {
+            if (isAutoplayActive) return;
+
+            if (autoplayMode === 'instant') {
+              playInstant();
+              showNotification('Revealing all steps smoothly...');
+              return;
+            }
+
+            isAutoplayActive = true;
+            updateAutoplayUI();
+            playNextStep();
+          }
+
+          function stopAutoplay() {
+            isAutoplayActive = false;
+            if (autoplayInterval) {
+              clearTimeout(autoplayInterval);
+              autoplayInterval = null;
+            }
+            updateAutoplayUI();
+          }
+
+          async function playInstant() {
+            isAutoplayActive = true;
+            updateAutoplayUI();
+
+            let clickedAny = true;
+            let iterations = 0;
+            while (clickedAny && iterations < 500 && isAutoplayActive) {
+              const visibleNodes = Array.from(document.querySelectorAll('.is-node')).filter(el => {
+                return !el.classList.contains('is-hidden') && el.style.display !== 'none';
+              });
+              const availableBtns = [];
+              visibleNodes.forEach(node => {
+                const btns = node.querySelectorAll('.conn-btn:not(.active):not(.clicked-hidden)');
+                btns.forEach(btn => availableBtns.push(btn));
+              });
+
+              if (availableBtns.length > 0) {
+                availableBtns.forEach(btn => btn.click());
+                iterations++;
+                await new Promise(resolve => setTimeout(resolve, 150));
+              } else {
+                clickedAny = false;
+              }
+            }
+            stopAutoplay();
+          }
+
+          function playNextStep() {
+            if (!isAutoplayActive) return;
+
+            const visibleNodes = Array.from(document.querySelectorAll('.is-node')).filter(el => {
+              return !el.classList.contains('is-hidden') && el.style.display !== 'none';
+            });
+
+            const availableBtns = [];
+            visibleNodes.forEach(node => {
+              const btns = node.querySelectorAll('.conn-btn:not(.active):not(.clicked-hidden)');
+              btns.forEach(btn => availableBtns.push(btn));
+            });
+
+            if (availableBtns.length > 0) {
+              const btn = availableBtns[0];
+              btn.click();
+              
+              const delayInput = document.getElementById('autoplay-delay-input');
+              const val = delayInput ? parseFloat(delayInput.value) : 1.5;
+              const delayMs = isNaN(val) || val <= 0 ? 1500 : val * 1000;
+              
+              autoplayInterval = setTimeout(playNextStep, delayMs);
+            } else {
+              stopAutoplay();
+            }
+          }
+
+          function updateAutoplayUI() {
+            const btn = document.getElementById('autoplay-btn');
+            if (btn) {
+              const playIcon = btn.querySelector('.play-icon');
+              const pauseIcon = btn.querySelector('.pause-icon');
+              if (isAutoplayActive) {
+                playIcon.style.display = 'none';
+                pauseIcon.style.display = 'block';
+                btn.style.background = '#ff9800';
+              } else {
+                playIcon.style.display = 'block';
+                pauseIcon.style.display = 'none';
+                btn.style.background = '#4caf50';
+              }
+            }
+          }
+
           let slides = [];
           let currentSlideIndex = 0;
           let isPresenting = false;
@@ -1741,9 +1901,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               return;
             }
             isPresenting = true;
-            document.getElementById('presentation-bar').style.display = 'flex';
-            document.getElementById('present-btn').style.display = 'none';
-            document.getElementById('theme-toggle-btn').style.display = 'none';
+             document.getElementById('presentation-bar').style.display = 'flex';
+             document.getElementById('present-btn').style.display = 'none';
+             document.getElementById('theme-toggle-btn').style.display = 'none';
+             document.getElementById('autoplay-btn').style.display = 'none';
+             document.getElementById('autoplay-settings-btn').style.display = 'none';
+             document.getElementById('autoplay-settings-panel').style.display = 'none';
             document.querySelector('.brush-toolbar').style.display = 'none';
             const showBtn = document.getElementById('brush-show-btn');
             if (showBtn) showBtn.style.display = 'none';
@@ -1761,9 +1924,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
           window.exitPresentation = () => {
             isPresenting = false;
-            document.getElementById('presentation-bar').style.display = 'none';
-            document.getElementById('present-btn').style.display = 'flex';
-            document.getElementById('theme-toggle-btn').style.display = 'flex';
+             document.getElementById('presentation-bar').style.display = 'none';
+             document.getElementById('present-btn').style.display = 'flex';
+             document.getElementById('theme-toggle-btn').style.display = 'flex';
+             document.getElementById('autoplay-btn').style.display = 'flex';
+             document.getElementById('autoplay-settings-btn').style.display = 'flex';
             const toolbar = document.querySelector('.brush-toolbar');
             const showBtn = document.getElementById('brush-show-btn');
             const isHidden = toolbar.classList.contains('hidden-toolbar');
