@@ -1495,8 +1495,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         * { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
         body.presentation-mode #interactive-content { transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1); }
         .draggable-element { transition: transform 0.05s linear; }
-        .notification-toast { position: fixed; right: 24px; bottom: 24px; max-width: min(420px, calc(100vw - 48px)); background: var(--bg-toolbar); color: var(--text-primary); padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateY(120%); opacity: 0; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; pointer-events: none; }
-        .notification-toast.show { transform: translateY(0); opacity: 1; }
+        .notification-toast { position: fixed; top: 76px; right: 20px; max-width: min(420px, calc(100vw - 40px)); background: var(--bg-toolbar); color: var(--text-primary); padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateX(120%); opacity: 0; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; pointer-events: none; }
+        .notification-toast.show { transform: translateX(0); opacity: 1; }
         .zoom-controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); padding: 5px; padding-left: 20px; border-radius: 40px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 15px; color: var(--text-primary); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
         .btn-fit { background: #3f51b5; border: none; color: white; padding: 10px 24px; border-radius: 30px; cursor: pointer; font-size: 13px; font-weight: 700; transition: all 0.2s; white-space: nowrap; box-shadow: 0 4px 12px rgba(63, 81, 181, 0.3); }
         .btn-fit:hover { background: #4c5fd7; transform: scale(1.05); }
