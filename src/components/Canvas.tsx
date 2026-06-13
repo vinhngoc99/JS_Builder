@@ -1,19 +1,23 @@
 import React, { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
 import { useBuilder } from '../BuilderContext';
 import { ElementWrapper } from './ElementWrapper';
-import { ZoomIn, ZoomOut, Maximize, MousePointer2, Type, Square, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw, X, Settings, Smile } from 'lucide-react';
+import { MousePointer2, Type, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw, X, Smile } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { ALL_EFFECTS } from '../animations/effects';
+import { getSlideAnimationSteps } from '../animations';
+import { getConnectionArrow, getConnectionDasharray, getConnectionStroke } from '../models/Connection';
 
 export const Canvas: React.FC = () => {
   const { 
     elements, connections, selectElement, connectingNode, setConnectingNode, 
-    selectedIds, selectedConnectionId, selectConnection, removeElement, removeConnection, 
+    selectedIds, selectedConnectionId, selectConnection, removeConnection, 
     scale, setScale, pan, setPan, editingFocalPointId, setEditingFocalPointId, 
     addElement, removeSelected, duplicateSelected, updateElement,
     brushStrokes, isBrushMode, brushColor, brushWidth, setBrushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo, saveHistory,
-    theme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, isPresenting, setIsPresenting,
+    guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, isPresenting, setIsPresenting,
     currentSlideIndex, setCurrentSlideIndex, revealDownstream, isHelpOpen, setIsHelpOpen,
-    brushTool, setBrushTool, eraseBrushStrokesAt
+    brushTool, setBrushTool, eraseBrushStrokesAt,
+    playedAnimationIds, setPlayedAnimationIds
   } = useBuilder();
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -80,12 +84,35 @@ export const Canvas: React.FC = () => {
     const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
     if (slides.length === 0) return;
     const safeIndex = Math.max(0, Math.min(index, slides.length - 1));
+    
+    const targetSlide = slides[safeIndex];
+    const targetAnimations: string[] = [];
+    const autoPlayIds: string[] = [];
+    
+    elements.forEach(el => {
+      if (el.id === targetSlide.id || el.parentId === targetSlide.id) {
+        (el.animations || []).forEach(anim => {
+          targetAnimations.push(anim.id);
+          if (anim.trigger === 'onEnter') {
+            autoPlayIds.push(anim.id);
+          }
+        });
+      }
+    });
+
+    const newPlayedIds = playedAnimationIds.filter(id => !targetAnimations.includes(id));
+    if (safeIndex < currentSlideIndex) {
+      setPlayedAnimationIds([...newPlayedIds, ...targetAnimations]);
+    } else {
+      setPlayedAnimationIds([...newPlayedIds, ...autoPlayIds]);
+    }
+
     setCurrentSlideIndex(safeIndex);
     
     const slide = slides[safeIndex];
     
-    if (slide.isHidden) {
-      updateElement(slide.id, { isHidden: false });
+    if (!slide.visible) {
+      updateElement(slide.id, { visible: true } as any);
       revealDownstream(slide.id);
     }
 
@@ -105,7 +132,33 @@ export const Canvas: React.FC = () => {
     
     setScale(targetScale);
     setPan({ x: targetPanX, y: targetPanY });
-  }, [elements, setScale, setPan, updateElement, revealDownstream, setCurrentSlideIndex]);
+  }, [elements, setScale, setPan, updateElement, revealDownstream, setCurrentSlideIndex, currentSlideIndex, playedAnimationIds, setPlayedAnimationIds]);
+
+  const handleNextClick = useCallback(() => {
+    const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
+    const currentSlide = slides[currentSlideIndex];
+    if (!currentSlide) return;
+
+    const slideSteps = getSlideAnimationSteps(currentSlide.id, elements);
+    const nextStep = slideSteps.find(step => 
+      !step.animations.every(anim => playedAnimationIds.includes(anim.id))
+    );
+
+    if (nextStep) {
+      const nextAnimIds = nextStep.animations.map(a => a.id);
+      setPlayedAnimationIds(prev => [...prev, ...nextAnimIds]);
+    } else {
+      if (currentSlideIndex < slides.length - 1) {
+        goToSlide(currentSlideIndex + 1);
+      }
+    }
+  }, [elements, currentSlideIndex, playedAnimationIds, setPlayedAnimationIds, goToSlide]);
+
+  const handlePrevClick = useCallback(() => {
+    if (currentSlideIndex > 0) {
+      goToSlide(currentSlideIndex - 1);
+    }
+  }, [currentSlideIndex, goToSlide]);
 
   useEffect(() => {
     if (isPresenting) {
@@ -158,17 +211,12 @@ export const Canvas: React.FC = () => {
       }
 
       if (isPresenting) {
-        const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
         if (e.key === 'ArrowRight' || e.key === ' ' || e.code === 'Space' || e.key === 'Enter') {
           e.preventDefault();
-          if (currentSlideIndex < slides.length - 1) {
-            goToSlide(currentSlideIndex + 1);
-          }
+          handleNextClick();
         } else if (e.key === 'ArrowLeft' || ((e.key === ' ' || e.code === 'Space') && e.shiftKey)) {
           e.preventDefault();
-          if (currentSlideIndex > 0) {
-            goToSlide(currentSlideIndex - 1);
-          }
+          handlePrevClick();
         } else if (e.key === 'Escape') {
           e.preventDefault();
           setIsPresenting(false);
@@ -189,7 +237,7 @@ export const Canvas: React.FC = () => {
 
         selectedIds.forEach(id => {
           const el = elements.find(x => x.id === id);
-          if (el && !el.isLocked) {
+          if (el && !el.locked) {
             updateElement(el.id, { x: el.x + dx, y: el.y + dy });
           }
         });
@@ -342,8 +390,8 @@ export const Canvas: React.FC = () => {
   const handleAddElementFromMenu = (type: any) => {
     if (!contextMenu) return;
     const rect = canvasRef.current!.getBoundingClientRect();
-    const clickX = 'originalX' in contextMenu ? contextMenu.originalX : contextMenu.x;
-    const clickY = 'originalY' in contextMenu ? contextMenu.originalY : contextMenu.y;
+    const clickX = contextMenu.originalX;
+    const clickY = contextMenu.originalY;
     const x = (clickX - rect.left - pan.x) / scale, y = (clickY - rect.top - pan.y) / scale;
     addElement(type, { x: x - 50, y: y - 25 }); setContextMenu(null);
   };
@@ -480,30 +528,93 @@ export const Canvas: React.FC = () => {
     let el = elements.find(e => e.id === id); if (!el) return null;
     let { x, y, width, height } = el;
     if (el.parentId) { const parent = elements.find(e => e.id === el?.parentId); if (parent) { x += parent.x + 16; y += parent.y + 45 + 16; } }
-    return { x, y, width, height };
+    return { x, y, width, height, rotation: el.rotation || 0 };
   };
 
-  const getPathData = (startX: number, startY: number, startPort: string, endX: number, endY: number, endPort: string) => {
+  const rotateVector = (x: number, y: number, degrees: number) => {
+    const rad = degrees * Math.PI / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return {
+      x: x * cos - y * sin,
+      y: x * sin + y * cos,
+    };
+  };
+
+  const getPathData = (
+    startX: number,
+    startY: number,
+    startPort: string,
+    endX: number,
+    endY: number,
+    endPort: string,
+    startNormal?: { x: number; y: number },
+    endNormal?: { x: number; y: number }
+  ) => {
     const dx = endX - startX;
     const dy = endY - startY;
     const dist = Math.hypot(dx, dy);
     const controlDist = Math.min(Math.max(dist * 0.35, 30), 120);
     let cx1 = startX, cy1 = startY, cx2 = endX, cy2 = endY;
-    if (startPort === 'top') cy1 -= controlDist; else if (startPort === 'bottom') cy1 += controlDist; else if (startPort === 'left') cx1 -= controlDist; else cx1 += controlDist;
-    if (endPort === 'top') cy2 -= controlDist; else if (endPort === 'bottom') cy2 += controlDist; else if (endPort === 'left') cx2 -= controlDist; else cx2 += controlDist;
+    if (startNormal) {
+      cx1 += startNormal.x * controlDist;
+      cy1 += startNormal.y * controlDist;
+    } else if (startPort === 'top') cy1 -= controlDist; else if (startPort === 'bottom') cy1 += controlDist; else if (startPort === 'left') cx1 -= controlDist; else cx1 += controlDist;
+    if (endNormal) {
+      cx2 += endNormal.x * controlDist;
+      cy2 += endNormal.y * controlDist;
+    } else if (endPort === 'top') cy2 -= controlDist; else if (endPort === 'bottom') cy2 += controlDist; else if (endPort === 'left') cx2 -= controlDist; else cx2 += controlDist;
     return `M ${startX} ${startY} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${endX} ${endY}`;
   };
 
   const getPortCoords = (bounds: any, port: string) => {
-    let x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
-    if (port === 'top') y = bounds.y; else if (port === 'bottom') y = bounds.y + bounds.height; else if (port === 'left') x = bounds.x; else if (port === 'right') x = bounds.x + bounds.width;
-    return { x, y };
+    const rotation = bounds.rotation || 0;
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    let localX = 0;
+    let localY = 0;
+    let normalX = 1;
+    let normalY = 0;
+
+    if (port === 'top') {
+      localY = -bounds.height / 2;
+      normalX = 0;
+      normalY = -1;
+    } else if (port === 'bottom') {
+      localY = bounds.height / 2;
+      normalX = 0;
+      normalY = 1;
+    } else if (port === 'left') {
+      localX = -bounds.width / 2;
+      normalX = -1;
+      normalY = 0;
+    } else {
+      localX = bounds.width / 2;
+      normalX = 1;
+      normalY = 0;
+    }
+
+    const point = rotateVector(localX, localY, rotation);
+    const normal = rotateVector(normalX, normalY, rotation);
+    return { x: centerX + point.x, y: centerY + point.y, nx: normal.x, ny: normal.y };
   };
 
   const baseGridSize = 24;
   let currentGridSize = baseGridSize * scale;
   while (currentGridSize < 15) currentGridSize *= 2;
   while (currentGridSize > 60) currentGridSize /= 2;
+
+  const presentationSlides = elements
+    .filter(el => el.type === 'node' && (el as any).isSlide !== false)
+    .sort((a, b) => a.x - b.x);
+  const currentPresentationSlide = presentationSlides[currentSlideIndex];
+  const hasRemainingAnimationStep = currentPresentationSlide
+    ? getSlideAnimationSteps(currentPresentationSlide.id, elements).some(step =>
+        !step.animations.every(anim => playedAnimationIds.includes(anim.id))
+      )
+    : false;
+  const isPrevDisabled = currentSlideIndex === 0;
+  const isNextDisabled = currentSlideIndex >= presentationSlides.length - 1 && !hasRemainingAnimationStep;
 
   const renderHorizontalRuler = () => {
     const { ticks } = getRulerTicks(containerSize.width - 20, pan.x - 20, scale);
@@ -549,6 +660,7 @@ export const Canvas: React.FC = () => {
 
   return (
     <div className={`canvas-container ${(isPresenting && isLaserActive) ? 'laser-cursor-none' : ''} ${(isBrushMode && !isSpaceDown) ? 'brush-cursor-none' : ''}`} onContextMenu={handleContextMenu}>
+      <style>{ALL_EFFECTS.map(e => e.css).join('\n')}</style>
       {/* Rulers */}
       {!isPresenting && (
         <>
@@ -578,12 +690,6 @@ export const Canvas: React.FC = () => {
           
           <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute', pointerEvents: isBrushMode ? 'none' : 'auto' }}>
             <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#6c6d80" />
-              </marker>
-              <marker id="arrow-selected" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#4caf50" />
-              </marker>
             </defs>
             {connections.map(conn => {
               const f = elements.find(el => el.id === conn.fromId);
@@ -593,22 +699,27 @@ export const Canvas: React.FC = () => {
               const fb = getAbsoluteBounds(conn.fromId), tb = getAbsoluteBounds(conn.toId); 
               if (!fb || !tb) return null;
               
-              let { x: sx, y: sy } = getPortCoords(fb, conn.fromPort);
-              let { x: ex, y: ey } = getPortCoords(tb, conn.toPort);
+              const startPort = getPortCoords(fb, conn.fromPort);
+              const endPort = getPortCoords(tb, conn.toPort);
+              let { x: sx, y: sy } = startPort;
+              let { x: ex, y: ey } = endPort;
+
+              const stroke = getConnectionStroke(conn);
+              const arrow = getConnectionArrow(conn);
+              const lineColor = selectedConnectionId === conn.id ? '#4caf50' : stroke.color;
+              const markerBaseId = `editor-marker-${conn.id}`;
+              const markerStart = arrow.start !== 'none' ? `url(#${markerBaseId}-start)` : "none";
+              const markerEnd = arrow.end !== 'none' ? `url(#${markerBaseId}-end)` : "none";
 
               // Shorten path if there are arrowheads to create an aesthetic gap
-              const gap = 1.8;
-              if (conn.startArrow === 'arrow') {
-                if (conn.fromPort === 'top') sy -= gap;
-                else if (conn.fromPort === 'bottom') sy += gap;
-                else if (conn.fromPort === 'left') sx -= gap;
-                else if (conn.fromPort === 'right') sx += gap;
+              const gap = Math.max(1.8, arrow.size * 0.3);
+              if (arrow.start !== 'none') {
+                sx += startPort.nx * gap;
+                sy += startPort.ny * gap;
               }
-              if (conn.endArrow === 'arrow') {
-                if (conn.toPort === 'top') ey -= gap;
-                else if (conn.toPort === 'bottom') ey += gap;
-                else if (conn.toPort === 'left') ex -= gap;
-                else if (conn.toPort === 'right') ex += gap;
+              if (arrow.end !== 'none') {
+                ex += endPort.nx * gap;
+                ey += endPort.ny * gap;
               }
 
               const dx = ex - sx;
@@ -616,23 +727,41 @@ export const Canvas: React.FC = () => {
               const dist = Math.hypot(dx, dy);
               const controlDist = Math.min(Math.max(dist * 0.35, 30), 120);
               let cx1 = sx, cy1 = sy, cx2 = ex, cy2 = ey;
-              if (conn.fromPort === 'top') cy1 -= controlDist; 
-              else if (conn.fromPort === 'bottom') cy1 += controlDist; 
-              else if (conn.fromPort === 'left') cx1 -= controlDist; 
-              else cx1 += controlDist;
-
-              if (conn.toPort === 'top') cy2 -= controlDist; 
-              else if (conn.toPort === 'bottom') cy2 += controlDist; 
-              else if (conn.toPort === 'left') cx2 -= controlDist; 
-              else cx2 += controlDist;
+              cx1 += startPort.nx * controlDist;
+              cy1 += startPort.ny * controlDist;
+              cx2 += endPort.nx * controlDist;
+              cy2 += endPort.ny * controlDist;
 
               const midX = 0.125 * sx + 0.375 * cx1 + 0.375 * cx2 + 0.125 * ex;
               const midY = 0.125 * sy + 0.375 * cy1 + 0.375 * cy2 + 0.125 * ey;
-              const pathData = `M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${ex} ${ey}`;
-              const markerStart = conn.startArrow === 'arrow' ? (selectedConnectionId === conn.id ? "url(#arrow-selected)" : "url(#arrow)") : "none";
-              const markerEnd = conn.endArrow === 'arrow' ? (selectedConnectionId === conn.id ? "url(#arrow-selected)" : "url(#arrow)") : "none";
+              const pathData = stroke.lineType === 'straight'
+                ? `M ${sx} ${sy} L ${ex} ${ey}`
+                : stroke.lineType === 'elbow'
+                  ? `M ${sx} ${sy} L ${sx} ${midY} L ${ex} ${midY} L ${ex} ${ey}`
+                  : `M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${ex} ${ey}`;
+              const markerPath = (type: string, id: string, orient: string) => {
+                if (type === 'circle') {
+                  return (
+                    <marker id={id} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={arrow.size} markerHeight={arrow.size} orient={orient}>
+                      <circle cx="5" cy="5" r="3.2" fill={lineColor} />
+                    </marker>
+                  );
+                }
+                if (type === 'diamond') {
+                  return (
+                    <marker id={id} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={arrow.size} markerHeight={arrow.size} orient={orient}>
+                      <path d="M 5 0.8 L 9.2 5 L 5 9.2 L 0.8 5 Z" fill={lineColor} />
+                    </marker>
+                  );
+                }
+                return (
+                  <marker id={id} viewBox="0 0 10 10" refX="7" refY="5" markerWidth={arrow.size} markerHeight={arrow.size} orient={orient}>
+                    <path d={type === 'triangle' ? 'M 1 1 L 9 5 L 1 9 Z' : 'M 0 1.5 L 10 5 L 0 8.5 Z'} fill={lineColor} />
+                  </marker>
+                );
+              };
 
-              const isConnHidden = f.isHidden || t.isHidden;
+              const isConnHidden = !f.visible || !t.visible;
               return (
                 <g 
                   key={conn.id} 
@@ -645,8 +774,24 @@ export const Canvas: React.FC = () => {
                   onPointerDown={(e) => { e.stopPropagation(); selectConnection(conn.id); }}
                   onDoubleClick={(e) => { e.stopPropagation(); removeConnection(conn.id); }}
                 >
-                  <path id={`editor-conn-${conn.id}`} d={pathData} className="connection-path" markerStart={markerStart} markerEnd={markerEnd} />
-                  <path id={`editor-conn-pulse-${conn.id}`} d={pathData} className="flow-pulse-path" fill="none" stroke={conn.color || '#4c5fd7'} strokeWidth="2" strokeLinecap="round" opacity="0.8" />
+                  <defs>
+                    {arrow.start !== 'none' && markerPath(arrow.start, `${markerBaseId}-start`, 'auto-start-reverse')}
+                    {arrow.end !== 'none' && markerPath(arrow.end, `${markerBaseId}-end`, 'auto')}
+                  </defs>
+                  <path
+                    id={`editor-conn-${conn.id}`}
+                    d={pathData}
+                    className="connection-path"
+                    markerStart={markerStart}
+                    markerEnd={markerEnd}
+                    stroke={lineColor}
+                    strokeWidth={stroke.width}
+                    strokeDasharray={getConnectionDasharray(stroke.style, stroke.width)}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ stroke: lineColor, strokeWidth: stroke.width }}
+                  />
+                  <path id={`editor-conn-pulse-${conn.id}`} d={pathData} className="flow-pulse-path" fill="none" stroke={lineColor} strokeWidth={Math.max(2, stroke.width)} strokeLinecap="round" opacity="0.8" />
                   <path d={pathData} stroke="transparent" strokeWidth="20" fill="none" />
                   
                   {conn.label && (
@@ -697,7 +842,20 @@ export const Canvas: React.FC = () => {
                 </g>
               );
             })}
-            {connectingNode && <path d={getPathData(getPortCoords(getAbsoluteBounds(connectingNode.id), connectingNode.port).x, getPortCoords(getAbsoluteBounds(connectingNode.id), connectingNode.port).y, connectingNode.port, mousePos.x, mousePos.y, 'left')} fill="none" stroke="#4caf50" strokeWidth="2" strokeDasharray="5,5" />}
+            {connectingNode && (() => {
+              const bounds = getAbsoluteBounds(connectingNode.id);
+              if (!bounds) return null;
+              const port = getPortCoords(bounds, connectingNode.port);
+              return (
+                <path
+                  d={getPathData(port.x, port.y, connectingNode.port, mousePos.x, mousePos.y, 'left', { x: port.nx, y: port.ny })}
+                  fill="none"
+                  stroke="#4caf50"
+                  strokeWidth="2"
+                  strokeDasharray="5,5"
+                />
+              );
+            })()}
           </svg>
 
           {elements.filter(el => !el.parentId).map(el => (
@@ -758,7 +916,7 @@ export const Canvas: React.FC = () => {
           <svg className="brush-layer" style={{ overflow: 'visible', position: 'absolute', zIndex: 1000, pointerEvents: 'none' }}>
             {brushStrokes.map(s => {
               const attachedNode = elements.find(el => el.id === s.attachedNodeId);
-              const isHidden = attachedNode ? attachedNode.isHidden : false;
+              const isHidden = attachedNode ? !attachedNode.visible : false;
               return (
                 <path
                   key={s.id}
@@ -884,12 +1042,10 @@ export const Canvas: React.FC = () => {
         >
           <button 
             className="btn" 
-            onClick={() => {
-              if (currentSlideIndex > 0) setCurrentSlideIndex(currentSlideIndex - 1);
-            }} 
-            disabled={currentSlideIndex === 0}
+            onClick={handlePrevClick} 
+            disabled={isPrevDisabled}
             tabIndex={-1}
-            style={{ padding: '6px 12px', opacity: currentSlideIndex === 0 ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
+            style={{ padding: '6px 12px', opacity: isPrevDisabled ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
           >
             &larr; Prev
           </button>
@@ -914,20 +1070,17 @@ export const Canvas: React.FC = () => {
               .sort((a, b) => a.x - b.x)
               .map((slide, idx) => (
                 <option key={slide.id} value={idx}>
-                  Slide {idx + 1}: {slide.title || `Node ${idx + 1}`}
+                  Slide {idx + 1}: {slide.name || `Node ${idx + 1}`}
                 </option>
               ))}
           </select>
           
           <button 
             className="btn" 
-            onClick={() => {
-              const slidesCount = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).length;
-              if (currentSlideIndex < slidesCount - 1) setCurrentSlideIndex(currentSlideIndex + 1);
-            }} 
-            disabled={currentSlideIndex === elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).length - 1}
+            onClick={handleNextClick} 
+            disabled={isNextDisabled}
             tabIndex={-1}
-            style={{ padding: '6px 12px', opacity: currentSlideIndex === elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).length - 1 ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
+            style={{ padding: '6px 12px', opacity: isNextDisabled ? 0.4 : 1, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: 'pointer' }}
           >
             Next &rarr;
           </button>

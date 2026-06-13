@@ -1,7 +1,12 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
-import { CanvasElement, ElementType, Connection, PortPosition, BrushStroke, Variant, IconElement } from './types';
+import { CanvasElement, ElementType, Connection, PortPosition, BrushStroke, Variant, ButtonElement } from './types';
 import { getIconSvgPath } from './icons';
 import { v4 as uuidv4 } from 'uuid';
+import { createElement } from './models/Element';
+import { migrateConnections, migrateElements, migrateVariants } from './models/migration';
+import { compat } from './models/compat';
+import { ALL_EFFECTS } from './animations/effects';
+import { getConnectionArrow, getConnectionDasharray, getConnectionStroke } from './models/Connection';
 
 // --- Utilities ---
 
@@ -73,6 +78,67 @@ export const getAdaptedBgColor = (type: string, color: string | undefined): stri
   return color || 'transparent';
 };
 
+// --- OOP Helpers: Bridge new model to legacy rendering ---
+
+/** Get the fill color from an element's fill style */
+export const getElementFillColor = (el: CanvasElement): string => {
+  if (el.fill.type === 'none') return 'transparent';
+  return el.fill.color || 'transparent';
+};
+
+/** Get the border/stroke CSS values */
+export const getElementStroke = (el: CanvasElement) => ({
+  width: el.stroke.width,
+  color: el.stroke.color,
+  radius: el.stroke.radius,
+  style: el.stroke.style,
+});
+
+/** Get text content from element */
+export const getElementText = (el: CanvasElement): string => {
+  return el.text?.content || '';
+};
+
+/** Get text color */
+export const getElementTextColor = (el: CanvasElement): string => {
+  return getAdaptedTextColor(el.text?.color);
+};
+
+/** Get font family */
+export const getElementFontFamily = (el: CanvasElement): string => {
+  return el.text?.fontFamily || "'Google Sans Text'";
+};
+
+/** Get font size */
+export const getElementFontSize = (el: CanvasElement): number => {
+  return el.text?.fontSize || 16;
+};
+
+/** Get text alignment */
+export const getElementTextAlign = (el: CanvasElement): string => {
+  return el.text?.align || 'center';
+};
+
+/** Get element name / title for display */
+export const getElementName = (el: CanvasElement): string => {
+  return el.name || '';
+};
+
+/** Get the shadow CSS */
+export const getElementShadowCSS = (el: CanvasElement): string => {
+  if (!el.shadow.enabled) return 'none';
+  const s = el.shadow;
+  return `${s.offsetX}px ${s.offsetY}px ${s.blur}px ${s.spread}px ${s.color}`;
+};
+
+/** Get button action */
+export const getElementAction = (el: CanvasElement): { type: string; target: string; link: string } => {
+  if (el.type === 'button') {
+    return (el as ButtonElement).action;
+  }
+  return { type: 'none', target: '', link: '#' };
+};
+
 interface ConnectingState {
   id: string;
   port: PortPosition;
@@ -113,7 +179,7 @@ interface BuilderContextType {
   setIsBlurEnabled: (enabled: boolean) => void;
   
   addElement: (type: ElementType, pos?: { x: number, y: number }, additionalProps?: Partial<CanvasElement>) => void;
-  updateElement: (id: string, updates: Partial<CanvasElement>) => void;
+  updateElement: (id: string, updates: Partial<CanvasElement> & Record<string, any>) => void;
   updateConnection: (id: string, updates: Partial<Connection>) => void;
   removeElement: (id: string) => void;
   removeSelected: () => void;
@@ -130,6 +196,10 @@ interface BuilderContextType {
   distributeElements: (direction: 'horizontal' | 'vertical') => void;
   isPresenting: boolean;
   setIsPresenting: (presenting: boolean) => void;
+  playedAnimationIds: string[];
+  setPlayedAnimationIds: React.Dispatch<React.SetStateAction<string[]>>;
+  previewAnimationId: string | null;
+  setPreviewAnimationId: (id: string | null) => void;
   editingFocalPointId: string | null;
   setEditingFocalPointId: (id: string | null) => void;
   setBrushMode: (enabled: boolean) => void;
@@ -157,6 +227,20 @@ interface BuilderContextType {
   importHTML: (htmlText: string) => boolean;
   showAlert: (message: string, title?: string) => Promise<void>;
   showConfirm: (message: string, title?: string) => Promise<boolean>;
+  
+  // --- Layer Management (Miro/Figma-style) ---
+  bringToFront: (id: string) => void;
+  sendToBack: (id: string) => void;
+  bringForward: (id: string) => void;
+  sendBackward: (id: string) => void;
+  reorderElements: (draggedId: string, targetId: string) => void;
+  
+  // --- Group Management ---
+  groupElements: (ids: string[]) => void;
+  ungroupElements: (groupId: string) => void;
+  
+  // --- Animation Management ---
+  updateElementAnimations: (id: string, animations: any[]) => void;
 }
 
 const BuilderContext = createContext<BuilderContextType | undefined>(undefined);
@@ -166,7 +250,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     const saved = localStorage.getItem('js-builder-variants');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Migrate old format elements to new OOP format
+        return migrateVariants(parsed);
       } catch (e) {
         console.warn("Failed to parse variants, using fallback", e);
       }
@@ -178,8 +264,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     return [{
       id: 'default',
       name: 'Variant 1',
-      elements: oldElements,
-      connections: oldConnections,
+      elements: migrateElements(oldElements),
+      connections: migrateConnections(oldConnections),
       brushStrokes: oldBrush,
       guides: oldGuides
     }];
@@ -196,10 +282,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       try {
         const parsed = JSON.parse(savedVariants) as Variant[];
         const active = parsed.find(v => v.id === savedActiveId);
-        if (active) return active.elements;
+        if (active) return migrateElements(active.elements);
       } catch {}
     }
-    return safeParse('js-builder-elements', []);
+    return migrateElements(safeParse('js-builder-elements', []));
   });
 
   const [connections, setConnections] = useState<Connection[]>(() => {
@@ -209,10 +295,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       try {
         const parsed = JSON.parse(savedVariants) as Variant[];
         const active = parsed.find(v => v.id === savedActiveId);
-        if (active) return active.connections;
+        if (active) return migrateConnections(active.connections);
       } catch {}
     }
-    return safeParse('js-builder-connections', []);
+    return migrateConnections(safeParse('js-builder-connections', []));
   });
 
   const [brushStrokes, setBrushStrokes] = useState<BrushStroke[]>(() => {
@@ -299,6 +385,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [editingFocalPointId, setEditingFocalPointId] = useState<string | null>(null);
   const [isPresenting, setIsPresenting] = useState(false);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [playedAnimationIds, setPlayedAnimationIds] = useState<string[]>([]);
+  const [previewAnimationId, setPreviewAnimationId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(true);
   
@@ -339,7 +427,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const targetEl = elementsRef.current.find(e => e.id === targetId);
         if (targetEl) {
           toUpdate.add(targetId);
-          if (!targetEl.enableExpandButton) {
+          if (!targetEl.interactive) {
             traverse(targetId);
           }
         }
@@ -351,7 +439,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (toUpdate.size > 0) {
       setElements(prev => prev.map(el => {
         if (toUpdate.has(el.id)) {
-          return { ...el, isHidden: false };
+          return { ...el, visible: true };
         }
         return el;
       }));
@@ -539,11 +627,13 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     const targetVariant = updatedVariants.find(v => v.id === targetId);
     if (targetVariant) {
+      const targetElements = migrateElements(targetVariant.elements);
+      const targetConnections = migrateConnections(targetVariant.connections);
       setActiveVariantIdState(targetId);
       setVariants(updatedVariants);
 
-      setElements(targetVariant.elements);
-      setConnections(targetVariant.connections);
+      setElements(targetElements);
+      setConnections(targetConnections);
       setBrushStrokes(targetVariant.brushStrokes);
       setGuides(targetVariant.guides);
 
@@ -596,10 +686,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (activeVariantId === id) {
       const nextActiveIndex = index === 0 ? 0 : index - 1;
       const targetVariant = updatedVariants[nextActiveIndex];
+      const targetElements = migrateElements(targetVariant.elements);
+      const targetConnections = migrateConnections(targetVariant.connections);
       setActiveVariantIdState(targetVariant.id);
       setVariants(updatedVariants);
-      setElements(targetVariant.elements);
-      setConnections(targetVariant.connections);
+      setElements(targetElements);
+      setConnections(targetConnections);
       setBrushStrokes(targetVariant.brushStrokes);
       setGuides(targetVariant.guides);
       setSelectedIds([]);
@@ -624,18 +716,23 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       const state = JSON.parse(match[1]);
       if (state.variants && state.activeVariantId) {
         saveHistory();
-        setVariants(state.variants);
-        setActiveVariantIdState(state.activeVariantId);
+        const nextVariants = migrateVariants(state.variants);
+        if (nextVariants.length === 0) return false;
+        const nextActiveId = nextVariants.some(v => v.id === state.activeVariantId)
+          ? state.activeVariantId
+          : nextVariants[0]?.id || 'default';
+        setVariants(nextVariants);
+        setActiveVariantIdState(nextActiveId);
         
-        const active = state.variants.find((v: any) => v.id === state.activeVariantId);
+        const active = nextVariants.find((v: any) => v.id === nextActiveId);
         if (active) {
           setElements(active.elements || []);
           setConnections(active.connections || []);
           setBrushStrokes(active.brushStrokes || []);
           setGuides(active.guides || []);
         }
-        if (state.theme) {
-          setThemeState(state.theme);
+        if (state.theme === 'light' || state.theme === 'dark') {
+          setTheme(state.theme);
         }
         setSelectedIds([]);
         setSelectedConnectionId(null);
@@ -647,8 +744,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const fallbackVariant: Variant = {
           id: 'default',
           name: 'Variant 1',
-          elements: state.elements || [],
-          connections: state.connections || [],
+          elements: migrateElements(state.elements || []),
+          connections: migrateConnections(state.connections || []),
           brushStrokes: state.brushStrokes || [],
           guides: state.guides || []
         };
@@ -658,8 +755,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         setConnections(fallbackVariant.connections);
         setBrushStrokes(fallbackVariant.brushStrokes);
         setGuides(fallbackVariant.guides);
-        if (state.theme) {
-          setThemeState(state.theme);
+        if (state.theme === 'light' || state.theme === 'dark') {
+          setTheme(state.theme);
         }
         setSelectedIds([]);
         setSelectedConnectionId(null);
@@ -678,49 +775,81 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     saveHistory();
     const id = uuidv4();
     
-    // Determine target width and height to calculate offset
-    let width = 220;
-    let height = 250;
-    if (additionalProps?.width) width = additionalProps.width;
-    else {
-      switch (type) {
-        case 'node': width = 220; height = 250; break;
-        case 'text': width = 150; height = 60; break;
-        case 'button': width = 120; height = 40; break;
-        case 'image': width = 150; height = 150; break;
-        case 'video': width = 280; height = 157; break;
-        case 'shape': width = 100; height = 100; break;
-        case 'icon': width = 60; height = 60; break;
-      }
-    }
-    if (additionalProps?.height) height = additionalProps.height;
-
+    // Create element using OOP factory
+    const newElement = createElement(type, { id, ...additionalProps } as any);
+    
+    // Calculate position
     const viewCenterX = window.innerWidth / 2;
     const viewCenterY = window.innerHeight / 2;
-
     const offset = (elements.length * 15) % 150;
     const canvasCenterX = (viewCenterX - pan.x) / scale;
     const canvasCenterY = (viewCenterY - pan.y) / scale;
 
-    const x = pos ? pos.x : canvasCenterX - width / 2 + offset;
-    const y = pos ? pos.y : canvasCenterY - height / 2 + offset;
+    newElement.x = pos ? pos.x : canvasCenterX - newElement.width / 2 + offset;
+    newElement.y = pos ? pos.y : canvasCenterY - newElement.height / 2 + offset;
+    newElement.name = additionalProps?.name || `${type.charAt(0).toUpperCase() + type.slice(1)} ${elements.length + 1}`;
 
-    const baseProps = { id, type, x, y, width, height, title: `Node ${elements.length + 1}`, rotation: 0, parentId: null };
-    let newElement: CanvasElement;
-    switch (type) {
-      case 'node': newElement = { ...baseProps, type: 'node', backgroundColor: 'var(--bg-node)', title: `Node ${elements.length + 1}`, fontFamily: "'Google Sans Text'", ...additionalProps }; break;
-      case 'text': newElement = { ...baseProps, type: 'text', text: 'Workflow Text', fontSize: 16, color: 'var(--text-primary)', fontFamily: "'Google Sans Text'", borderWidth: 1, borderColor: 'var(--border-color)', borderRadius: 4, backgroundColor: 'transparent', ...additionalProps }; break;
-      case 'button': newElement = { ...baseProps, type: 'button', text: 'Action', link: '#', backgroundColor: '#4caf50', color: '#ffffff', borderRadius: 6, actionType: 'alert', actionTarget: 'Button clicked!', fontFamily: "'Google Sans Text'", ...additionalProps }; break;
-      case 'image': newElement = { ...baseProps, type: 'image', src: 'https://images.unsplash.com/photo-1531297172867-4f40136225a4?auto=format&fit=crop&w=300&q=80', alt: 'Placeholder', objectFit: 'cover', borderWidth: 0, borderColor: '#4caf50', borderRadius: 4, ...additionalProps }; break;
-      case 'video': newElement = { ...baseProps, type: 'video', src: '', borderWidth: 0, borderColor: '#4caf50', borderRadius: 8, ...additionalProps }; break;
-      case 'shape': newElement = { ...baseProps, type: 'shape', shapeType: 'rectangle', backgroundColor: 'transparent', borderColor: '#4caf50', borderWidth: 2, borderRadius: 8, color: 'var(--text-primary)', ...additionalProps }; break;
-      case 'icon': newElement = { ...baseProps, type: 'icon', iconName: additionalProps?.iconName || 'home', color: 'var(--text-primary)', ...additionalProps }; break;
-      default: return;
-    }
-    setElements([...elements, newElement as CanvasElement]); setSelectedIds([id]); setSelectedConnectionId(null);
+    // Apply position/size overrides if provided
+    if (additionalProps?.width) newElement.width = additionalProps.width;
+    if (additionalProps?.height) newElement.height = additionalProps.height;
+
+    setElements([...elements, newElement]); setSelectedIds([id]); setSelectedConnectionId(null);
   };
-  const updateElement = (id: string, updates: Partial<CanvasElement>) => {
-    setElements(prev => prev.map(el => el.id === id ? { ...el, ...updates } as CanvasElement : el));
+  const updateElement = (id: string, updates: Partial<CanvasElement> & Record<string, any>) => {
+    setElements(prev => prev.map(el => {
+      if (el.id !== id) return el;
+      
+      const merged = { ...el } as any;
+      
+      for (const [key, value] of Object.entries(updates)) {
+        // --- Translate legacy property names to new OOP model ---
+        if (key === 'backgroundColor') {
+          merged.fill = { ...merged.fill, type: value === 'transparent' ? 'none' : 'solid', color: value };
+        } else if (key === 'borderWidth') {
+          merged.stroke = { ...merged.stroke, width: value };
+        } else if (key === 'borderColor') {
+          merged.stroke = { ...merged.stroke, color: value };
+        } else if (key === 'borderRadius') {
+          merged.stroke = { ...merged.stroke, radius: value };
+        } else if (key === 'color' && merged.text) {
+          merged.text = { ...merged.text, color: value };
+        } else if (key === 'fontSize' && merged.text) {
+          merged.text = { ...merged.text, fontSize: value };
+        } else if (key === 'fontFamily' && merged.text) {
+          merged.text = { ...merged.text, fontFamily: value };
+        } else if (key === 'textAlign' && merged.text) {
+          merged.text = { ...merged.text, align: value };
+        } else if (key === 'text' && typeof value === 'string' && merged.text && typeof merged.text === 'object') {
+          // Update text content (string → TextStyle.content)
+          merged.text = { ...merged.text, content: value };
+        } else if (key === 'isHidden') {
+          merged.visible = !value;
+        } else if (key === 'isLocked') {
+          merged.locked = value;
+        } else if (key === 'isDisabled') {
+          merged.disabled = value;
+        } else if (key === 'isPinned') {
+          merged.pinned = value;
+        } else if (key === 'enableExpandButton') {
+          merged.interactive = value;
+        } else if (key === 'title') {
+          merged.name = value;
+        } else if (key === 'actionType' && merged.type === 'button') {
+          merged.action = { ...merged.action, type: value };
+        } else if (key === 'actionTarget' && merged.type === 'button') {
+          merged.action = { ...merged.action, target: value };
+        } else if (key === 'link' && merged.type === 'button') {
+          merged.action = { ...merged.action, link: value };
+        } else if (key === 'objectPosition' && merged.type === 'image') {
+          merged.objectPosition = value;
+        } else {
+          // Direct assignment for new OOP properties or unknown properties
+          merged[key] = value;
+        }
+      }
+      
+      return merged as CanvasElement;
+    }));
   };
 
   const updateConnection = (id: string, updates: Partial<Connection>) => {
@@ -965,6 +1094,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, []);
 
   const exportHTML = () => {
+    const animationKeyframesCSS = ALL_EFFECTS.map(eff => eff.css).join('\n');
     const sanitizeHTML = (html: string | undefined): string => {
       if (!html) return '';
       return html
@@ -977,9 +1107,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     // Collect fonts used by elements
     const usedFonts = new Set<string>();
     elements.forEach(el => {
-      const elAny = el as any;
-      if (elAny.fontFamily) {
-        const clean = elAny.fontFamily.replace(/['"]/g, '').trim();
+      const fontFamily = el.text?.fontFamily;
+      if (fontFamily) {
+        const clean = fontFamily.replace(/['"]/g, '').trim();
         if (clean) usedFonts.add(clean);
       }
     });
@@ -1026,7 +1156,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     // 1. Direct targets of Interactive Btns are hidden
     elements.forEach(el => {
-      if (el.enableExpandButton) {
+      if (el.interactive) {
         (adj.get(el.id) || []).forEach(c => {
           interactiveTargets.add(c.toId);
           hiddenConnections.add(c.id);
@@ -1041,11 +1171,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     while (queue.length > 0) {
       const curr = queue.shift()!;
       const el = elementsMap.get(curr);
-      if (el && el.isPinned) {
+      if (el && el.pinned) {
         continue; // Skip hiding pinned node
       }
       hiddenNodes.add(curr);
-      if (el && !el.enableExpandButton) {
+      if (el && !el.interactive) {
         (adj.get(curr) || []).forEach(c => {
           hiddenConnections.add(c.id);
           if (!visited.has(c.toId)) {
@@ -1071,8 +1201,46 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       arrowDown: "30,0 30,60 10,60 50,100 90,60 70,60 70,0"
     };
 
-    const buildElementHTML = (el: CanvasElement, isChild: boolean = false): string => {
-      const elAny = el as any;
+    const getExportFillCSS = (fill: any) => {
+      if (!fill || fill.type === 'none') return 'background: transparent;';
+      if (fill.type === 'solid') return `background: ${fill.color || 'transparent'};`;
+      if (fill.type === 'gradient' && fill.gradient) {
+        const { type, stops, angle } = fill.gradient;
+        const sortedStops = [...stops].sort((a, b) => a.offset - b.offset);
+        const stopsStr = sortedStops.map(s => `${s.color} ${s.offset * 100}%`).join(', ');
+        if (type === 'radial') {
+          return `background: radial-gradient(circle, ${stopsStr});`;
+        } else {
+          return `background: linear-gradient(${angle}deg, ${stopsStr});`;
+        }
+      }
+      return 'background: transparent;';
+    };
+
+    const getExportStrokeCSS = (stroke: any) => {
+      if (!stroke || stroke.width === 0) return 'border: none;';
+      return `border-width: ${stroke.width}px; border-style: ${stroke.style || 'solid'}; border-color: ${stroke.color || 'var(--border-color)'}; border-radius: ${stroke.radius}px;`;
+    };
+
+    const getExportShadowCSS = (shadow: any) => {
+      if (!shadow || !shadow.enabled) return 'box-shadow: none;';
+      return `box-shadow: ${shadow.offsetX}px ${shadow.offsetY}px ${shadow.blur}px ${shadow.spread || 0}px ${shadow.color};`;
+    };
+
+    const getExportSvgShadowCSS = (shadow: any) => {
+      if (!shadow || !shadow.enabled) return 'filter: none;';
+      return `filter: drop-shadow(${shadow.offsetX}px ${shadow.offsetY}px ${shadow.blur}px ${shadow.color});`;
+    };
+
+    const getSvgStrokeDasharray = (style: string) => {
+      if (style === 'dashed') return '8 4';
+      if (style === 'dotted') return '2 2';
+      return 'none';
+    };
+
+    const buildElementHTML = (rawEl: CanvasElement, isChild: boolean = false): string => {
+      const el = compat(rawEl) as any;
+      const elAny = el;
       const isFillParent = isChild && elAny.fillParent;
       
       const isInteractiveHidden = hiddenNodes.has(el.id);
@@ -1086,9 +1254,13 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       const innerVisibilityStyle = el.isHidden ? 'opacity: 0; pointer-events: none;' : '';
 
+      const shadowStyle = (el.type === 'node' || el.type === 'text' || el.type === 'button') 
+        ? getExportShadowCSS(rawEl.shadow) 
+        : '';
+
       const baseStyle = isFillParent 
-        ? `position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--text-primary); z-index: ${el.type === 'node' ? 1 : 2}; transition: opacity 0.4s ease; ${visibilityStyle}`
-        : `position: absolute; left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; color: var(--text-primary); transform: rotate(${el.rotation}deg); transform-origin: center center; z-index: ${el.type === 'node' ? 1 : 2}; transition: opacity 0.4s ease; ${visibilityStyle}`;
+        ? `position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--text-primary); --element-transform: rotate(0deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} transition: opacity 0.4s ease; ${visibilityStyle}`
+        : `position: absolute; left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; color: var(--text-primary); --element-transform: rotate(${el.rotation || 0}deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} transition: opacity 0.4s ease; ${visibilityStyle}`;
       
       let expandBtnHTML = '';
       if (el.enableExpandButton) {
@@ -1118,13 +1290,13 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const childrenHTML = children.map(child => buildElementHTML(child, true)).join('\n');
         const safeTitle = escapeHtml(el.title || '');
         const titleColor = `color: ${getAdaptedTextColor(el.color)};`;
-        return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} is-node ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} overflow: visible; cursor: grab;"><div style="width: 100%; height: 100%; background-color: ${getAdaptedBgColor('node', el.backgroundColor)}; font-family: ${el.fontFamily}; border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.3s; ${innerVisibilityStyle}"><div style="padding: 12px 16px; background-color: var(--panel-header-bg); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--border-color); pointer-events: none; ${titleColor}">${safeTitle}</div><div style="position: relative; flex: 1; padding: 16px; overflow: hidden;">${childrenHTML}</div></div>${expandBtnHTML}</div>`;
+        return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} is-node ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} overflow: visible; cursor: grab;"><div style="width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} font-family: ${el.fontFamily}; ${getExportStrokeCSS(rawEl.stroke)} display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.3s; ${innerVisibilityStyle}"><div style="padding: 12px 16px; background-color: var(--panel-header-bg); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--border-color); pointer-events: none; ${titleColor}">${safeTitle}</div><div style="position: relative; flex: 1; padding: 16px; overflow: hidden;">${childrenHTML}</div></div>${expandBtnHTML}</div>`;
       }
       let innerContent = '';
       switch (el.type) {
         case 'text': {
           const safeText = sanitizeHTML(el.text);
-          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; display: flex; align-items: center; justify-content: center; padding: 10px 14px; line-height: 1.5; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeText}</div></div>`;
+          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} display: flex; align-items: center; justify-content: center; padding: ${rawEl.text?.padding?.top ?? 10}px ${rawEl.text?.padding?.right ?? 14}px ${rawEl.text?.padding?.bottom ?? 10}px ${rawEl.text?.padding?.left ?? 14}px; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeText}</div></div>`;
           break;
         }
         case 'button': {
@@ -1160,21 +1332,21 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           
           const tag = action === 'link' ? 'a' : 'button';
           const buttonDisabledAttr = (action !== 'link' && el.isDisabled) ? 'disabled' : '';
-          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; background-color: ${el.backgroundColor}; color: ${getAdaptedTextColor(el.color)}; border: none; border-radius: ${el.borderRadius}px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: bold; font-size: ${elAny.fontSize || 16}px; padding: 8px 14px; line-height: 1.5; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeButtonText}</div></${tag}>`;
+          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} color: ${getAdaptedTextColor(el.color)}; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: ${rawEl.text?.fontWeight ?? 700}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; font-size: ${elAny.fontSize || 16}px; padding: 8px 14px; line-height: 1.5; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeButtonText}</div></${tag}>`;
           break;
         }
         case 'image': {
           const safeImgTitle = elAny.title ? escapeHtml(elAny.title) : '';
           const safeAlt = escapeHtml(el.alt);
           const imgHeader = safeImgTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeImgTitle}</div>` : '';
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative; overflow: hidden;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
+          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative; overflow: hidden;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; ${getExportStrokeCSS(rawEl.stroke)} box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
           break;
         }
         case 'video': {
           const safeVidTitle = elAny.title ? escapeHtml(elAny.title) : '';
           const safeSrc = escapeHtml(el.src);
           const vidHeader = safeVidTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeVidTitle}</div>` : '';
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${vidHeader}<div style="flex: 1; position: relative; overflow: hidden;"><iframe id="el-${el.id}" src="${safeSrc}" style="width: 100%; height: 100%; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; box-sizing: border-box;" frameborder="0" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe></div></div>`;
+          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${vidHeader}<div style="flex: 1; position: relative; overflow: hidden;"><iframe id="el-${el.id}" src="${safeSrc}" style="width: 100%; height: 100%; ${getExportStrokeCSS(rawEl.stroke)} box-sizing: border-box;" frameborder="0" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe></div></div>`;
           break;
         }
         case 'icon': {
@@ -1184,24 +1356,24 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
         case 'shape': {
           const hasText = el.text ? true : false;
-          const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 8px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word;">${sanitizeHTML(el.text)}</div></div>` : '';
+          const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 8px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'};">${sanitizeHTML(el.text)}</div></div>` : '';
           
           if (el.shapeType === 'rectangle') {
-            innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: ${el.borderRadius}px; pointer-events: none;">${shapeTextHTML}</div>`;
+            innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} pointer-events: none;">${shapeTextHTML}</div>`;
           } else if (el.shapeType === 'ellipse') {
-            innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; background-color: ${el.backgroundColor}; border: ${el.borderWidth}px solid ${getAdaptedBorderColor(el.borderColor)}; border-radius: 50%; pointer-events: none;">${shapeTextHTML}</div>`;
+            innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} border-radius: 50%; pointer-events: none;">${shapeTextHTML}</div>`;
           } else if (el.shapeType === 'line') {
-            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none;"><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" /></svg>${shapeTextHTML}</div>`;
+            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" /></svg>${shapeTextHTML}</div>`;
           } else if (el.shapeType === 'arrow') {
             const markerId = `arrowhead-${el.id}`;
-            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none;"><defs><marker id="${markerId}" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="${getAdaptedBorderColor(el.borderColor)}" /></marker></defs><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" marker-end="url(#${markerId})" /></svg>${shapeTextHTML}</div>`;
+            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><defs><marker id="${markerId}" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" /></marker></defs><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" marker-end="url(#${markerId})" /></svg>${shapeTextHTML}</div>`;
           } else if (el.shapeType === 'elbow') {
             const halfW = el.width / 2;
             const d = `M 0 0 L ${halfW} 0 L ${halfW} ${el.height} L ${el.width} ${el.height}`;
-            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none;"><path d="${d}" fill="none" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" /></svg>${shapeTextHTML}</div>`;
+            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><path d="${d}" fill="none" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" /></svg>${shapeTextHTML}</div>`;
           } else {
             const pts = (SHAPE_POLYGONS as any)[el.shapeType] || SHAPE_POLYGONS.triangle;
-            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none;"><polygon points="${pts}" fill="${el.backgroundColor}" stroke="${getAdaptedBorderColor(el.borderColor)}" stroke-width="${el.borderWidth}" vector-effect="non-scaling-stroke" /></svg>${shapeTextHTML}</div>`;
+            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><polygon points="${pts}" fill="${el.backgroundColor}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" vector-effect="non-scaling-stroke" /></svg>${shapeTextHTML}</div>`;
           }
           break;
         }
@@ -1213,12 +1385,33 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     const svgPaths = connections.map(conn => {
       const fromEl = elements.find(el => el.id === conn.fromId);
       const toEl = elements.find(el => el.id === conn.toId);
-      const isHidden = hiddenConnections.has(conn.id) || (fromEl && fromEl.isHidden) || (toEl && toEl.isHidden);
+      const isHidden = hiddenConnections.has(conn.id) || (fromEl && !fromEl.visible) || (toEl && !toEl.visible);
       const safeLabel = conn.label ? escapeHtml(conn.label) : '';
       
       const connFontFamily = conn.fontFamily ? ` font-family="${conn.fontFamily.replace(/"/g, '&quot;')}"` : '';
       const connFontSize = conn.fontSize || 14;
+      const connStroke = getConnectionStroke(conn);
+      const connArrow = getConnectionArrow(conn);
       const connColor = conn.color || 'var(--text-primary)';
+      const connLineColor = connStroke.color;
+      const connStrokeWidth = connStroke.width;
+      const connDasharray = getConnectionDasharray(connStroke.style, connStroke.width);
+      const markerStartId = `arrow-start-${conn.id}`;
+      const markerEndId = `arrow-end-${conn.id}`;
+      const markerStartAttr = connArrow.start !== 'none' ? `marker-start="url(#${markerStartId})"` : '';
+      const markerEndAttr = connArrow.end !== 'none' ? `marker-end="url(#${markerEndId})"` : '';
+      const dashAttr = connDasharray ? `stroke-dasharray="${connDasharray}"` : '';
+      const markerHTML = (type: string, id: string, orient: string) => {
+        if (type === 'circle') {
+          return `<marker id="${id}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><circle cx="5" cy="5" r="3.2" fill="${connLineColor}" /></marker>`;
+        }
+        if (type === 'diamond') {
+          return `<marker id="${id}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><path d="M 5 0.8 L 9.2 5 L 5 9.2 L 0.8 5 Z" fill="${connLineColor}" /></marker>`;
+        }
+        const d = type === 'triangle' ? 'M 1 1 L 9 5 L 1 9 Z' : 'M 0 1.5 L 10 5 L 0 8.5 Z';
+        return `<marker id="${id}" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><path d="${d}" fill="${connLineColor}" /></marker>`;
+      };
+      const defsHTML = `<defs>${connArrow.start !== 'none' ? markerHTML(connArrow.start, markerStartId, 'auto-start-reverse') : ''}${connArrow.end !== 'none' ? markerHTML(connArrow.end, markerEndId, 'auto') : ''}</defs>`;
 
       const labelHTML = safeLabel ? (
         conn.labelAlignment === 'follow'
@@ -1228,19 +1421,29 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             )
           : `<foreignObject id="conn-label-${conn.id}" x="0" y="0" width="400" height="40" pointer-events="none"><div style="display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; pointer-events: none;"><span style="background: var(--bg-canvas); padding: 3px 10px; border-radius: 100px; font-size: ${connFontSize}px; color: ${connColor}; font-weight: bold; white-space: nowrap; border: 1px solid var(--border-color); box-shadow: 0 2px 8px rgba(0,0,0,0.15);${conn.fontFamily ? ` font-family: ${conn.fontFamily};` : ''}">${safeLabel}</span></div></foreignObject>`
       ) : '';
-      const markerStartAttr = conn.startArrow === 'arrow' ? 'marker-start="url(#arrow)"' : '';
-      const markerEndAttr = conn.endArrow === 'arrow' ? 'marker-end="url(#arrow)"' : '';
-      return `<g id="conn-group-${conn.id}" class="connection-group ${isHidden ? 'is-hidden' : ''}" data-id="${conn.id}" data-from="${conn.fromId}" data-to="${conn.toId}" data-label="${escapeHtml(conn.label || '')}" data-align="${conn.labelAlignment || 'horizontal'}" style="cursor: pointer; transition: opacity 0.4s ease; opacity: 0;"><path id="conn-${conn.id}" fill="none" stroke="#6c6d80" stroke-width="2" ${markerStartAttr} ${markerEndAttr} /><path id="conn-pulse-${conn.id}" class="flow-pulse-path" fill="none" stroke="${conn.color || '#4c5fd7'}" stroke-width="2" stroke-linecap="round" /><path id="conn-hit-${conn.id}" stroke="transparent" stroke-width="20" fill="none" />${labelHTML}</g>`;
+      return `<g id="conn-group-${conn.id}" class="connection-group ${isHidden ? 'is-hidden' : ''}" data-id="${conn.id}" data-from="${conn.fromId}" data-to="${conn.toId}" data-label="${escapeHtml(conn.label || '')}" data-align="${conn.labelAlignment || 'horizontal'}" style="cursor: pointer; transition: opacity 0.4s ease; opacity: 0;">${defsHTML}<path id="conn-${conn.id}" fill="none" stroke="${connLineColor}" stroke-width="${connStrokeWidth}" stroke-linecap="round" stroke-linejoin="round" ${dashAttr} data-line-type="${connStroke.lineType}" ${markerStartAttr} ${markerEndAttr} /><path id="conn-pulse-${conn.id}" class="flow-pulse-path" fill="none" stroke="${connLineColor}" stroke-width="${Math.max(2, connStrokeWidth)}" stroke-linecap="round" /><path id="conn-hit-${conn.id}" stroke="transparent" stroke-width="${Math.max(20, connStrokeWidth + 16)}" fill="none" />${labelHTML}</g>`;
     }).join('\n');
 
     const brushPaths = brushStrokes.map(s => {
-      const isHidden = s.attachedNodeId && (hiddenNodes.has(s.attachedNodeId) || elementsMap.get(s.attachedNodeId)?.isHidden);
+      const isHidden = s.attachedNodeId && (hiddenNodes.has(s.attachedNodeId) || elementsMap.get(s.attachedNodeId)?.visible === false);
       const styleAttr = isHidden ? 'style="opacity: 0; pointer-events: none; transition: opacity 0.4s ease;"' : 'style="transition: opacity 0.4s ease;"';
-      return `<path d="${s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none" ${s.attachedNodeId ? `data-attached-node-id="${s.attachedNodeId}"` : ''} ${styleAttr} />`;
+      const ptsAttr = s.points.map(p => `${p.x},${p.y}`).join(' ');
+      return `<path d="${s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}" data-pts="${ptsAttr}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none" ${s.attachedNodeId ? `data-attached-node-id="${s.attachedNodeId}"` : ''} ${styleAttr} />`;
     }).join('\n');
     const rootElements = elements.filter(el => !el.parentId).map(el => buildElementHTML(el)).join('\n');
+    const scriptJson = (value: unknown) => JSON.stringify(value)
+      .replace(/</g, '\\u003c')
+      .replace(/>/g, '\\u003e')
+      .replace(/&/g, '\\u0026')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029');
 
-    return `
+    return `<!doctype html>
+      <html>
+      <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      ${fontLinkTags}
       <style>
         @font-face {
           font-family: 'Google Sans Display';
@@ -1285,10 +1488,15 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           --panel-header-bg: #f3f4f6;
         }
         body { margin: 0; padding: 0; overflow: hidden; background: var(--bg-canvas); font-family: 'Google Sans Text', sans-serif; color: var(--text-primary); transition: background 0.3s, color 0.3s; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; transition: background 0.2s; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+        * { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
         body.presentation-mode #interactive-content { transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1); }
         .draggable-element { transition: transform 0.05s linear; }
-        .notification-toast { position: fixed; top: 24px; right: 24px; background: var(--bg-toolbar); color: var(--text-primary); padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateX(120%); opacity: 0; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
-        .notification-toast.show { transform: translateX(0); opacity: 1; }
+        .notification-toast { position: fixed; right: 24px; bottom: 24px; max-width: min(420px, calc(100vw - 48px)); background: var(--bg-toolbar); color: var(--text-primary); padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateY(120%); opacity: 0; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; pointer-events: none; }
+        .notification-toast.show { transform: translateY(0); opacity: 1; }
         .zoom-controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); padding: 5px; padding-left: 20px; border-radius: 40px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 15px; color: var(--text-primary); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
         .btn-fit { background: #3f51b5; border: none; color: white; padding: 10px 24px; border-radius: 30px; cursor: pointer; font-size: 13px; font-weight: 700; transition: all 0.2s; white-space: nowrap; box-shadow: 0 4px 12px rgba(63, 81, 181, 0.3); }
         .btn-fit:hover { background: #4c5fd7; transform: scale(1.05); }
@@ -1379,8 +1587,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         .conn-btn.clicked-hidden { display: none !important; }
         .flow-reveal { animation: flowIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         .flow-hide { animation: flowOut 0.25s cubic-bezier(0.4, 0, 0.6, 1) forwards; }
-        @keyframes flowIn { from { opacity: 0; transform: scale(0.85) translateY(12px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-        @keyframes flowOut { from { opacity: 1; transform: scale(1) translateY(0); } to { opacity: 0; transform: scale(0.85) translateY(12px); } }
+        @keyframes flowIn { from { opacity: 0; transform: var(--element-transform, rotate(0deg)) scale(0.85) translateY(12px); } to { opacity: 1; transform: var(--element-transform, rotate(0deg)) scale(1) translateY(0); } }
+        @keyframes flowOut { from { opacity: 1; transform: var(--element-transform, rotate(0deg)) scale(1) translateY(0); } to { opacity: 0; transform: var(--element-transform, rotate(0deg)) scale(0.85) translateY(12px); } }
         .connection-group { transition: opacity 0.3s ease; }
         .is-hidden { opacity: 0 !important; pointer-events: none !important; }
         .wire-draw path:first-child { stroke-dasharray: var(--wire-len); stroke-dashoffset: var(--wire-len); animation: wireDraw 0.3s ease-out forwards; }
@@ -1440,8 +1648,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
         }
         #reset-layout:hover { background: #ff2a76 !important; transform: scale(1.05); }
+        ${animationKeyframesCSS}
       </style>
-      ${fontLinkTags}
+      </head>
+      <body>
       <button class="theme-toggle-btn" id="autoplay-btn" onclick="toggleAutoplay()" title="Auto Play Flow" style="right: 128px; display: flex; align-items: center; justify-content: center; background: #4caf50;">
         <svg class="play-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
         <svg class="pause-icon" style="display:none;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>
@@ -1532,14 +1742,21 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         (function() {
           window.toggleTheme = () => {
             const isLight = document.body.classList.toggle('light-theme');
-            localStorage.setItem('theme', isLight ? 'light' : 'dark');
+            try {
+              localStorage.setItem('theme', isLight ? 'light' : 'dark');
+            } catch (e) {}
             updateThemeIcons(isLight);
           };
           function updateThemeIcons(isLight) {
-            document.querySelector('.sun-icon').style.display = isLight ? 'block' : 'none';
-            document.querySelector('.moon-icon').style.display = isLight ? 'none' : 'block';
+            const sunIcon = document.querySelector('.sun-icon');
+            const moonIcon = document.querySelector('.moon-icon');
+            if (sunIcon) sunIcon.style.display = isLight ? 'block' : 'none';
+            if (moonIcon) moonIcon.style.display = isLight ? 'none' : 'block';
           }
-          const savedTheme = localStorage.getItem('theme') || '${theme}';
+          let savedTheme = '${theme}';
+          try {
+            savedTheme = localStorage.getItem('theme') || '${theme}';
+          } catch (e) {}
           if (savedTheme === 'light') {
             document.body.classList.add('light-theme');
             updateThemeIcons(true);
@@ -1550,8 +1767,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           const container = document.getElementById('interactive-container');
           const content = document.getElementById('interactive-content');
           const brushLayer = document.getElementById('brush-layer');
-          let elements = ${JSON.stringify(elements)};
-          const connections = ${JSON.stringify(connections)};
+          let elements = ${scriptJson(elements)};
+          const connections = ${scriptJson(connections)};
           const originalElements = JSON.parse(JSON.stringify(elements));
           const originalEditBrushHTML = document.getElementById('edit-brush-layer') ? document.getElementById('edit-brush-layer').innerHTML : '';
           let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step';
@@ -1589,13 +1806,52 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             return Math.hypot(p.x - projX, p.y - projY);
           }
 
+          function brushPtsToD(ptsStr) {
+            const pts = (ptsStr || '').trim().split(/\\s+/).filter(Boolean);
+            if (!pts.length) return '';
+            return pts.map((pt, idx) => {
+              const coords = pt.split(',');
+              return (idx === 0 ? 'M ' : 'L ') + coords[0] + ' ' + coords[1];
+            }).join(' ');
+          }
+
+          function translateBrushPath(path, dx, dy) {
+            const ptsSource = path.dataset.pts || path.getAttribute('data-pts') || '';
+            if (ptsSource) {
+              const updatedPts = ptsSource.trim().split(/\\s+/).map(pt => {
+                const coords = pt.split(',');
+                const px = parseFloat(coords[0]);
+                const py = parseFloat(coords[1]);
+                if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+                return (px + dx) + ',' + (py + dy);
+              }).filter(Boolean).join(' ');
+              if (updatedPts) {
+                path.dataset.pts = updatedPts;
+                path.setAttribute('data-pts', updatedPts);
+                path.setAttribute('d', brushPtsToD(updatedPts));
+              }
+              return;
+            }
+
+            const dAttr = path.getAttribute('d') || '';
+            const updatedD = dAttr.replace(/([ML])\\s*(-?\\d+(?:\\.\\d+)?)\\s*,?\\s*(-?\\d+(?:\\.\\d+)?)/gi, function(_, cmd, xVal, yVal) {
+              const px = parseFloat(xVal);
+              const py = parseFloat(yVal);
+              if (!Number.isFinite(px) || !Number.isFinite(py)) return '';
+              return cmd.toUpperCase() + ' ' + (px + dx) + ' ' + (py + dy);
+            });
+            if (updatedD.trim()) {
+              path.setAttribute('d', updatedD);
+            }
+          }
+
           function eraseBrushStrokesAt(currentPos, lastPos, radius) {
             const paths = Array.from(document.querySelectorAll('#edit-brush-layer path, #brush-layer path'));
             paths.forEach(path => {
-              const ptsStr = path.dataset.pts || path.getAttribute('d')?.replace(/[ML]/g, '').trim();
+              const ptsStr = path.dataset.pts || path.getAttribute('data-pts') || path.getAttribute('d')?.replace(/[ML]/g, '').trim();
               if (!ptsStr) return;
               
-              const pts = ptsStr.split(/[,\s]+/).map(parseFloat);
+              const pts = ptsStr.split(/[,\\s]+/).map(parseFloat);
               const points = [];
               for (let i = 0; i < pts.length; i += 2) {
                 if (!isNaN(pts[i]) && !isNaN(pts[i+1])) {
@@ -1641,6 +1897,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                   const dVal = subPts.map((pt, idx) => (idx === 0 ? 'M ' : 'L ') + pt.x + ' ' + pt.y).join(' ');
                   newPath.setAttribute('d', dVal);
                   newPath.dataset.pts = subPts.map(pt => pt.x + ',' + pt.y).join(' ');
+                  newPath.setAttribute('data-pts', newPath.dataset.pts);
                   
                   const attachedNodeId = path.dataset.attachedNodeId || path.getAttribute('data-attached-node-id');
                   if (attachedNodeId) {
@@ -1893,6 +2150,147 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           let slides = [];
           let currentSlideIndex = 0;
           let isPresenting = false;
+          let playedAnimationIds = [];
+
+          function getSlideAnimationSteps(slideId) {
+            const slideAnimations = [];
+            elements.forEach(el => {
+              if (el.id === slideId || el.parentId === slideId) {
+                (el.animations || []).forEach(anim => {
+                  slideAnimations.push({ anim, elementId: el.id });
+                });
+              }
+            });
+            slideAnimations.sort((a, b) => (a.anim.order || 0) - (b.anim.order || 0));
+
+            const steps = [];
+            let currentStep = null;
+            slideAnimations.forEach(({ anim }) => {
+              if (anim.trigger === 'onClick' || anim.trigger === 'onEnter' || !currentStep) {
+                currentStep = {
+                  triggerAnimId: anim.id,
+                  animations: [anim]
+                };
+                steps.push(currentStep);
+              } else {
+                currentStep.animations.push(anim);
+              }
+            });
+            return steps;
+          }
+
+          function getAnimationCSSStyle(element, playedAnimationIds) {
+            const animations = element.animations || [];
+            if (animations.length === 0) return {};
+
+            let activeAnim = null;
+            const played = animations.filter(a => playedAnimationIds.includes(a.id));
+            if (played.length > 0) {
+              activeAnim = played[played.length - 1];
+            }
+
+            const hasEntrance = animations.some(a => a.type === 'entrance');
+            const entrancePlayed = animations
+              .filter(a => a.type === 'entrance')
+              .every(a => playedAnimationIds.includes(a.id));
+
+            const styles = {};
+            if (hasEntrance && !entrancePlayed) {
+              styles.opacity = '0';
+              styles.pointerEvents = 'none';
+            } else {
+              styles.opacity = '1';
+              styles.pointerEvents = 'auto';
+            }
+
+            if (activeAnim) {
+              const isPlaying = playedAnimationIds.includes(activeAnim.id);
+              
+              if (isPlaying) {
+                styles.animationName = activeAnim.effect;
+                styles.animationDuration = activeAnim.duration + 'ms';
+                styles.animationTimingFunction = activeAnim.easing || 'ease';
+                styles.animationDelay = activeAnim.delay + 'ms';
+                styles.animationFillMode = 'forwards';
+
+                if (activeAnim.type === 'emphasis') {
+                  styles.animationFillMode = 'none';
+                }
+              }
+
+              if (playedAnimationIds.includes(activeAnim.id)) {
+                if (activeAnim.type === 'exit') {
+                  styles.opacity = '0';
+                  styles.pointerEvents = 'none';
+                } else if (activeAnim.type === 'entrance') {
+                  styles.opacity = '1';
+                }
+              }
+            }
+
+            return styles;
+          }
+
+          function updateAnimationStyles() {
+            if (!isPresenting) {
+              elements.forEach(el => {
+                const wrapper = document.getElementById('el-wrapper-' + el.id);
+                if (!wrapper) return;
+                wrapper.style.animationName = '';
+                wrapper.style.animationDuration = '';
+                wrapper.style.animationTimingFunction = '';
+                wrapper.style.animationDelay = '';
+                wrapper.style.animationFillMode = '';
+                wrapper.style.opacity = '';
+                wrapper.style.pointerEvents = '';
+              });
+              return;
+            }
+
+            elements.forEach(el => {
+              const wrapper = document.getElementById('el-wrapper-' + el.id);
+              if (!wrapper) return;
+              const styles = getAnimationCSSStyle(el, playedAnimationIds);
+              
+              wrapper.style.animationName = '';
+              wrapper.style.animationDuration = '';
+              wrapper.style.animationTimingFunction = '';
+              wrapper.style.animationDelay = '';
+              wrapper.style.animationFillMode = '';
+              
+              Object.keys(styles).forEach(key => {
+                wrapper.style[key] = styles[key];
+              });
+            });
+          }
+
+          function hasRemainingAnimationStep(slide) {
+            if (!slide) return false;
+            return getSlideAnimationSteps(slide.id).some(step =>
+              !step.animations.every(anim => playedAnimationIds.includes(anim.id))
+            );
+          }
+
+          function updatePresentationControls() {
+            const currentSlide = slides[currentSlideIndex];
+            const prevBtn = document.getElementById('prev-slide-btn');
+            const nextBtn = document.getElementById('next-slide-btn');
+            const selectEl = document.getElementById('slide-select');
+            const prevDisabled = currentSlideIndex === 0;
+            const nextDisabled = currentSlideIndex >= slides.length - 1 && !hasRemainingAnimationStep(currentSlide);
+
+            if (prevBtn) {
+              prevBtn.disabled = prevDisabled;
+              prevBtn.style.opacity = prevDisabled ? '0.4' : '1';
+            }
+            if (nextBtn) {
+              nextBtn.disabled = nextDisabled;
+              nextBtn.style.opacity = nextDisabled ? '0.4' : '1';
+            }
+            if (selectEl) {
+              selectEl.value = currentSlideIndex + '';
+            }
+          }
 
           window.startPresentation = () => {
             slides = elements.filter(el => el.type === 'node' && el.isSlide !== false).sort((a, b) => a.x - b.x);
@@ -1924,6 +2322,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
           window.exitPresentation = () => {
             isPresenting = false;
+            playedAnimationIds = [];
+            updateAnimationStyles();
              document.getElementById('presentation-bar').style.display = 'none';
              document.getElementById('present-btn').style.display = 'flex';
              document.getElementById('theme-toggle-btn').style.display = 'flex';
@@ -1943,9 +2343,33 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
           window.goToSlide = (index) => {
             if (slides.length === 0) return;
+            const prevIndex = currentSlideIndex;
             currentSlideIndex = Math.max(0, Math.min(index, slides.length - 1));
             
             const slide = slides[currentSlideIndex];
+            
+            const targetAnimations = [];
+            const autoPlayIds = [];
+            elements.forEach(el => {
+              if (el.id === slide.id || el.parentId === slide.id) {
+                (el.animations || []).forEach(anim => {
+                  targetAnimations.push(anim.id);
+                  if (anim.trigger === 'onEnter') {
+                    autoPlayIds.push(anim.id);
+                  }
+                });
+              }
+            });
+
+            const newPlayedIds = playedAnimationIds.filter(id => !targetAnimations.includes(id));
+            if (currentSlideIndex < prevIndex) {
+              playedAnimationIds = [...newPlayedIds, ...targetAnimations];
+            } else {
+              playedAnimationIds = [...newPlayedIds, ...autoPlayIds];
+            }
+
+            updateAnimationStyles();
+
             const slideEl = document.getElementById('el-wrapper-' + slide.id);
             if (slideEl && slideEl.classList.contains('is-hidden')) {
               revealCascade(slide.id);
@@ -1965,16 +2389,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             pan = { x: targetPanX, y: targetPanY };
             updateTransform();
             
-            document.getElementById('prev-slide-btn').disabled = (currentSlideIndex === 0);
-            document.getElementById('prev-slide-btn').style.opacity = (currentSlideIndex === 0) ? '0.4' : '1';
-            
-            document.getElementById('next-slide-btn').disabled = (currentSlideIndex === slides.length - 1);
-            document.getElementById('next-slide-btn').style.opacity = (currentSlideIndex === slides.length - 1) ? '0.4' : '1';
-            
-            const selectEl = document.getElementById('slide-select');
-            if (selectEl) {
-              selectEl.value = currentSlideIndex + '';
-            }
+            updatePresentationControls();
           };
 
           window.nextSlide = () => {
@@ -1986,7 +2401,25 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               startPresentation();
               return;
             }
-            if (currentSlideIndex < slides.length - 1) goToSlide(currentSlideIndex + 1);
+            
+            const currentSlide = slides[currentSlideIndex];
+            if (!currentSlide) return;
+
+            const slideSteps = getSlideAnimationSteps(currentSlide.id);
+            const nextStep = slideSteps.find(step => 
+              !step.animations.every(anim => playedAnimationIds.includes(anim.id))
+            );
+
+            if (nextStep) {
+              const nextAnimIds = nextStep.animations.map(a => a.id);
+              playedAnimationIds = [...playedAnimationIds, ...nextAnimIds];
+              updateAnimationStyles();
+              updatePresentationControls();
+            } else {
+              if (currentSlideIndex < slides.length - 1) {
+                goToSlide(currentSlideIndex + 1);
+              }
+            }
           };
 
           window.prevSlide = () => {
@@ -2172,7 +2605,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             });
 
             const elData = elements.find(e => e.id === id);
-            if (elData && elData.enableExpandButton) {
+            if (elData && (elData.interactive || elData.enableExpandButton)) {
               return;
             }
 
@@ -2216,7 +2649,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             const el = document.getElementById('el-wrapper-' + id);
             if (!el) return;
             const elData = elements.find(e => e.id === id);
-            if (elData && elData.isPinned) return;
+            if (elData && (elData.pinned || elData.isPinned)) return;
 
             el.classList.remove('flow-reveal');
             el.classList.add('flow-hide');
@@ -2380,31 +2813,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 elData.y = newY;
                 if (elData.type === 'node' && (diffX !== 0 || diffY !== 0)) {
                   const paths = document.querySelectorAll('path[data-attached-node-id="' + id + '"]');
-                  paths.forEach(path => {
-                    const ptsStr = path.dataset.pts || '';
-                    if (ptsStr) {
-                      const updatedPts = ptsStr.split(' ').map(pt => {
-                        const [px, py] = pt.split(',').map(parseFloat);
-                        return (px + diffX) + ',' + (py + diffY);
-                      }).join(' ');
-                      path.dataset.pts = updatedPts;
-                      path.setAttribute('d', 'M ' + updatedPts.split(' ').map(p => p.replace(',', ' ')).join(' L '));
-                    } else {
-                      const dAttr = path.getAttribute('d') || '';
-                      const tokens = dAttr.trim().split(/[\s,]+/);
-                      let updatedD = '';
-                      for (let i = 0; i < tokens.length; i++) {
-                        const token = tokens[i];
-                        if (token === 'M' || token === 'L') {
-                          const px = parseFloat(tokens[i+1]) + diffX;
-                          const py = parseFloat(tokens[i+2]) + diffY;
-                          updatedD += (updatedD ? ' ' : '') + token + ' ' + px + ' ' + py;
-                          i += 2;
-                        }
-                      }
-                      path.setAttribute('d', updatedD);
-                    }
-                  });
+                  paths.forEach(path => translateBrushPath(path, diffX, diffY));
                 }
               }
               requestAnimationFrame(updateConnections);
@@ -2433,8 +2842,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                   break;
                 }
               }
+              if (ptsStr) {
+                currentStroke.setAttribute('data-pts', ptsStr);
+              }
               if (attachedNodeId) {
                 currentStroke.setAttribute('data-attached-node-id', attachedNodeId);
+                currentStroke.dataset.attachedNodeId = attachedNodeId;
               }
               saveHistory();
             }
@@ -2464,49 +2877,86 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             const el = document.getElementById('el-wrapper-' + id); if (!el) return null;
             let x = parseFloat(el.style.left), y = parseFloat(el.style.top);
             const parent = el.parentElement.closest('.is-node');
-            if (parent) { x += parseFloat(parent.style.left); y += parseFloat(parent.style.top) + 45; }
-            return { x, y, width: parseFloat(el.style.width), height: parseFloat(el.style.height) };
+            if (parent) { x += parseFloat(parent.style.left) + 16; y += parseFloat(parent.style.top) + 45 + 16; }
+            const data = elements.find(item => item.id === id);
+            return { x, y, width: parseFloat(el.style.width), height: parseFloat(el.style.height), rotation: data ? (data.rotation || 0) : 0 };
+          }
+
+          function rotateVector(x, y, degrees) {
+            const rad = degrees * Math.PI / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+            return {
+              x: x * cos - y * sin,
+              y: x * sin + y * cos
+            };
           }
 
           function updateConnections() {
             connections.forEach(conn => {
               const path = document.getElementById('conn-' + conn.id); if (!path) return;
               const f = getAbsoluteBounds(conn.fromId), t = getAbsoluteBounds(conn.toId); if (!f || !t) return;
-              const coords = (b, p) => { let x = b.x + b.width/2, y = b.y + b.height/2; if (p === 'top') y = b.y; else if (p === 'bottom') y = b.y + b.height; else if (p === 'left') x = b.x; else x = b.x + b.width; return {x, y}; };
+              const coords = (b, p) => {
+                const cx = b.x + b.width / 2;
+                const cy = b.y + b.height / 2;
+                let lx = 0, ly = 0, nx = 1, ny = 0;
+                if (p === 'top') {
+                  ly = -b.height / 2; nx = 0; ny = -1;
+                } else if (p === 'bottom') {
+                  ly = b.height / 2; nx = 0; ny = 1;
+                } else if (p === 'left') {
+                  lx = -b.width / 2; nx = -1; ny = 0;
+                } else {
+                  lx = b.width / 2; nx = 1; ny = 0;
+                }
+                const point = rotateVector(lx, ly, b.rotation || 0);
+                const normal = rotateVector(nx, ny, b.rotation || 0);
+                return { x: cx + point.x, y: cy + point.y, nx: normal.x, ny: normal.y };
+              };
               const s = coords(f, conn.fromPort), e = coords(t, conn.toPort);
-              const gap = 1.8;
-              if (conn.startArrow === 'arrow') {
-                if (conn.fromPort === 'top') s.y -= gap;
-                else if (conn.fromPort === 'bottom') s.y += gap;
-                else if (conn.fromPort === 'left') s.x -= gap;
-                else if (conn.fromPort === 'right') s.x += gap;
+              const connArrow = Object.assign({ start: conn.startArrow || 'none', end: conn.endArrow || 'none', size: 6 }, conn.arrow || {});
+              const connStroke = Object.assign({ lineType: 'curve' }, conn.stroke || {});
+              const gap = Math.max(1.8, connArrow.size * 0.3);
+              if (connArrow.start !== 'none') {
+                s.x += s.nx * gap;
+                s.y += s.ny * gap;
               }
-              if (conn.endArrow === 'arrow') {
-                if (conn.toPort === 'top') e.y -= gap;
-                else if (conn.toPort === 'bottom') e.y += gap;
-                else if (conn.toPort === 'left') e.x -= gap;
-                else if (conn.toPort === 'right') e.x += gap;
+              if (connArrow.end !== 'none') {
+                e.x += e.nx * gap;
+                e.y += e.ny * gap;
               }
               const dx = e.x - s.x;
               const dy = e.y - s.y;
               const dist = Math.hypot(dx, dy);
               const cd = Math.min(Math.max(dist * 0.35, 30), 120);
               let cx1 = s.x, cy1 = s.y, cx2 = e.x, cy2 = e.y;
-              if (conn.fromPort === 'top') cy1 -= cd; else if (conn.fromPort === 'bottom') cy1 += cd; else if (conn.fromPort === 'left') cx1 -= cd; else cx1 += cd;
-              if (conn.toPort === 'top') cy2 -= cd; else if (conn.toPort === 'bottom') cy2 += cd; else if (conn.toPort === 'left') cx2 -= cd; else cx2 += cd;
-              path.setAttribute('d', 'M ' + s.x + ' ' + s.y + ' C ' + cx1 + ' ' + cy1 + ', ' + cx2 + ' ' + cy2 + ', ' + e.x + ' ' + e.y);
+              cx1 += s.nx * cd;
+              cy1 += s.ny * cd;
+              cx2 += e.nx * cd;
+              cy2 += e.ny * cd;
+              const midX = 0.125 * s.x + 0.375 * cx1 + 0.375 * cx2 + 0.125 * e.x;
+              const midY = 0.125 * s.y + 0.375 * cy1 + 0.375 * cy2 + 0.125 * e.y;
+              const d = connStroke.lineType === 'straight'
+                ? 'M ' + s.x + ' ' + s.y + ' L ' + e.x + ' ' + e.y
+                : connStroke.lineType === 'elbow'
+                  ? 'M ' + s.x + ' ' + s.y + ' L ' + s.x + ' ' + midY + ' L ' + e.x + ' ' + midY + ' L ' + e.x + ' ' + e.y
+                  : 'M ' + s.x + ' ' + s.y + ' C ' + cx1 + ' ' + cy1 + ', ' + cx2 + ' ' + cy2 + ', ' + e.x + ' ' + e.y;
+              const reverseD = connStroke.lineType === 'straight'
+                ? 'M ' + e.x + ' ' + e.y + ' L ' + s.x + ' ' + s.y
+                : connStroke.lineType === 'elbow'
+                  ? 'M ' + e.x + ' ' + e.y + ' L ' + e.x + ' ' + midY + ' L ' + s.x + ' ' + midY + ' L ' + s.x + ' ' + s.y
+                  : 'M ' + e.x + ' ' + e.y + ' C ' + cx2 + ' ' + cy2 + ', ' + cx1 + ' ' + cy1 + ', ' + s.x + ' ' + s.y;
+              path.setAttribute('d', d);
               const pulsePath = document.getElementById('conn-pulse-' + conn.id);
               if (pulsePath) {
-                pulsePath.setAttribute('d', 'M ' + s.x + ' ' + s.y + ' C ' + cx1 + ' ' + cy1 + ', ' + cx2 + ' ' + cy2 + ', ' + e.x + ' ' + e.y);
+                pulsePath.setAttribute('d', d);
               }
               const helperPath = document.getElementById('conn-text-' + conn.id);
               if (helperPath) {
-                helperPath.setAttribute('d', 'M ' + e.x + ' ' + e.y + ' C ' + cx2 + ' ' + cy2 + ', ' + cx1 + ' ' + cy1 + ', ' + s.x + ' ' + s.y);
+                helperPath.setAttribute('d', reverseD);
               }
               const labelEl = document.getElementById('conn-label-' + conn.id);
               if (labelEl) {
-                const midX = 0.125 * s.x + 0.375 * cx1 + 0.375 * cx2 + 0.125 * e.x;
-                const midY = 0.125 * s.y + 0.375 * cy1 + 0.375 * cy2 + 0.125 * e.y;
                 const tagName = labelEl.tagName.toLowerCase();
                 if (tagName === 'textpath') {
                   // do nothing
@@ -2550,7 +3000,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 wrapper.classList.remove('flow-reveal', 'flow-hide', 'show-btns');
                 wrapper.style.filter = '';
                 
-                const isInteractiveHidden = ${JSON.stringify(Array.from(hiddenNodes))}.includes(el.id);
+                const isInteractiveHidden = ${scriptJson(Array.from(hiddenNodes))}.includes(el.id);
                 if (isInteractiveHidden) {
                   wrapper.classList.add('is-hidden');
                   wrapper.style.opacity = '0';
@@ -2581,7 +3031,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             document.querySelectorAll('.connection-group').forEach(cg => {
               cg.classList.remove('flow-active');
               const connId = cg.dataset.id;
-              const isInitialHidden = ${JSON.stringify(Array.from(hiddenConnections))}.includes(connId);
+              const isInitialHidden = ${scriptJson(Array.from(hiddenConnections))}.includes(connId);
               cg.style.opacity = '0';
               if (isInitialHidden) {
                 cg.classList.add('is-hidden');
@@ -2631,13 +3081,119 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           }, 500);
         })();
       </script>
-      <script id="js-builder-state" type="application/json">${JSON.stringify({
+      <script id="js-builder-state" type="application/json">${scriptJson({
         variants: variants.map(v => v.id === activeVariantId ? { ...v, elements, connections, brushStrokes, guides } : v),
         activeVariantId,
         theme
       })}</script>
+      </body>
+      </html>
     `;
   };
+
+  // --- Layer Management (Miro/Figma-style) ---
+  
+  const bringToFront = useCallback((id: string) => {
+    saveHistory();
+    setElements(prev => {
+      const maxZ = Math.max(...prev.map(el => el.zIndex || 0));
+      return prev.map(el => el.id === id ? { ...el, zIndex: maxZ + 1 } as CanvasElement : el);
+    });
+  }, [saveHistory]);
+
+  const sendToBack = useCallback((id: string) => {
+    saveHistory();
+    setElements(prev => {
+      const minZ = Math.min(...prev.map(el => el.zIndex || 0));
+      return prev.map(el => el.id === id ? { ...el, zIndex: minZ - 1 } as CanvasElement : el);
+    });
+  }, [saveHistory]);
+
+  const bringForward = useCallback((id: string) => {
+    saveHistory();
+    setElements(prev => {
+      const el = prev.find(e => e.id === id);
+      if (!el) return prev;
+      const currentZ = el.zIndex || 0;
+      // Find the next higher zIndex
+      const aboveElements = prev.filter(e => (e.zIndex || 0) > currentZ);
+      if (aboveElements.length === 0) return prev;
+      const nextZ = Math.min(...aboveElements.map(e => e.zIndex || 0));
+      return prev.map(e => {
+        if (e.id === id) return { ...e, zIndex: nextZ + 1 } as CanvasElement;
+        return e;
+      });
+    });
+  }, [saveHistory]);
+
+  const sendBackward = useCallback((id: string) => {
+    saveHistory();
+    setElements(prev => {
+      const el = prev.find(e => e.id === id);
+      if (!el) return prev;
+      const currentZ = el.zIndex || 0;
+      // Find the next lower zIndex
+      const belowElements = prev.filter(e => (e.zIndex || 0) < currentZ);
+      if (belowElements.length === 0) return prev;
+      const prevZ = Math.max(...belowElements.map(e => e.zIndex || 0));
+      return prev.map(e => {
+        if (e.id === id) return { ...e, zIndex: prevZ - 1 } as CanvasElement;
+        return e;
+      });
+    });
+  }, [saveHistory]);
+
+  const reorderElements = useCallback((draggedId: string, targetId: string) => {
+    saveHistory();
+    setElements(prev => {
+      // Sort elements by zIndex descending (top layers first)
+      const sorted = [...prev].sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0));
+      const dragIdx = sorted.findIndex(el => el.id === draggedId);
+      const targetIdx = sorted.findIndex(el => el.id === targetId);
+      if (dragIdx === -1 || targetIdx === -1) return prev;
+
+      const newSorted = [...sorted];
+      const [draggedElement] = newSorted.splice(dragIdx, 1);
+      newSorted.splice(targetIdx, 0, draggedElement);
+
+      // Re-assign sequential z-indexes to all elements
+      // Top layer gets zIndex = length, bottom gets 1
+      return prev.map(el => {
+        const sortedIndex = newSorted.findIndex(s => s.id === el.id);
+        if (sortedIndex !== -1) {
+          return { ...el, zIndex: newSorted.length - sortedIndex } as CanvasElement;
+        }
+        return el;
+      });
+    });
+  }, [saveHistory]);
+
+  // --- Group Management ---
+  
+  const groupElements = useCallback((ids: string[]) => {
+    if (ids.length < 2) return;
+    saveHistory();
+    const groupId = uuidv4();
+    setElements(prev => prev.map(el => 
+      ids.includes(el.id) ? { ...el, groupId } as CanvasElement : el
+    ));
+  }, [saveHistory]);
+
+  const ungroupElements = useCallback((groupId: string) => {
+    saveHistory();
+    setElements(prev => prev.map(el => 
+      el.groupId === groupId ? { ...el, groupId: null } as CanvasElement : el
+    ));
+  }, [saveHistory]);
+
+  // --- Animation Management ---
+
+  const updateElementAnimations = useCallback((id: string, animations: any[]) => {
+    saveHistory();
+    setElements(prev => prev.map(el => 
+      el.id === id ? { ...el, animations } as CanvasElement : el
+    ));
+  }, [saveHistory]);
 
   const [dialogConfig, setDialogConfig] = useState<{
     isOpen: boolean;
@@ -2688,10 +3244,15 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       theme, setTheme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, setIsSnapEnabled: handleSetIsSnapEnabled,
       isBlurEnabled, setIsBlurEnabled: handleSetIsBlurEnabled,
       currentSlideIndex, setCurrentSlideIndex, revealDownstream,
+      playedAnimationIds, setPlayedAnimationIds,
+      previewAnimationId, setPreviewAnimationId,
       isHelpOpen, setIsHelpOpen,
       isPropertiesOpen, setIsPropertiesOpen,
       variants, activeVariantId, switchVariant, addVariant, deleteVariant, renameVariant, importHTML,
-      showAlert, showConfirm
+      showAlert, showConfirm,
+      bringToFront, sendToBack, bringForward, sendBackward, reorderElements,
+      groupElements, ungroupElements,
+      updateElementAnimations
     }}>
       {children}
       {dialogConfig.isOpen && (

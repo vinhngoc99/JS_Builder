@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { Plus, Trash2, Upload, Download, Play, Eye, X, Edit3 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Plus, Upload, Download, Play, Eye, X, Edit3 } from 'lucide-react';
 import { useBuilder } from '../BuilderContext';
 import { createPortal } from 'react-dom';
 
@@ -14,7 +14,6 @@ export const TopHeader: React.FC = () => {
     importHTML,
     exportHTML,
     setIsPresenting,
-    theme,
     showConfirm
   } = useBuilder();
 
@@ -23,10 +22,26 @@ export const TopHeader: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [htmlCode, setHtmlCode] = useState('');
+  const [previewUrl, setPreviewUrl] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!modalOpen || !previewMode || !htmlCode) {
+      setPreviewUrl('');
+      return;
+    }
+
+    const blob = new Blob([htmlCode], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    setPreviewUrl(url);
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [htmlCode, modalOpen, previewMode]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToastMessage(message);
@@ -80,17 +95,27 @@ export const TopHeader: React.FC = () => {
   };
 
   const handleExportClick = () => {
-    const code = exportHTML();
-    setHtmlCode(code);
-    setPreviewMode(false);
-    setModalOpen(true);
+    try {
+      const code = exportHTML();
+      setHtmlCode(code);
+      setPreviewMode(false);
+      setModalOpen(true);
+    } catch (error) {
+      console.error('Failed to export HTML', error);
+      showToast('Failed to export HTML. Check the console for details.', 'error');
+    }
   };
 
   const handlePreviewClick = () => {
-    const code = exportHTML();
-    setHtmlCode(code);
-    setPreviewMode(true);
-    setModalOpen(true);
+    try {
+      const code = exportHTML();
+      setHtmlCode(code);
+      setPreviewMode(true);
+      setModalOpen(true);
+    } catch (error) {
+      console.error('Failed to preview HTML', error);
+      showToast('Failed to preview HTML. Check the console for details.', 'error');
+    }
   };
 
   const handleDownloadFile = () => {
@@ -274,7 +299,8 @@ export const TopHeader: React.FC = () => {
               {previewMode ? (
                 <div className="modal-preview-frame">
                   <iframe
-                    srcDoc={htmlCode}
+                    key={previewUrl}
+                    src={previewUrl}
                     title="Live Preview"
                     sandbox="allow-scripts allow-same-origin"
                   />

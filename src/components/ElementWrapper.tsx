@@ -3,12 +3,14 @@ import { Settings } from 'lucide-react';
 import { useBuilder, getAdaptedTextColor, getAdaptedBorderColor, getAdaptedBgColor } from '../BuilderContext';
 import { CanvasElement, PortPosition } from '../types';
 import { getIconSvgPath } from '../icons';
+import { compat } from '../models/compat';
 
 interface ElementWrapperProps {
   element: CanvasElement;
 }
 
-export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
+export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElement }) => {
+  const element = compat(rawElement) as any;
   const { 
     elements, selectedIds, selectElement, updateElement, setConnectingNode, connectingNode, 
     addConnection, scale, editingFocalPointId, setEditingFocalPointId, saveHistory, isSnapEnabled, guides,
@@ -122,7 +124,26 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
       // Save content to elements array, but do NOT exit edit mode
       if (editableRef.current) {
         const updatedHTML = editableRef.current.innerHTML;
-        let updates: Partial<CanvasElement> = { text: updatedHTML };
+        const currentText = rawElement.text || {
+          content: '',
+          fontFamily: "'Google Sans Text'",
+          fontSize: 16,
+          fontWeight: 400,
+          fontStyle: 'normal',
+          textDecoration: 'none',
+          color: 'var(--text-primary)',
+          align: 'center',
+          verticalAlign: 'middle',
+          lineHeight: 1.5,
+          letterSpacing: 0,
+          padding: { top: 10, right: 14, bottom: 10, left: 14 }
+        };
+        const updates: Partial<CanvasElement> = {
+          text: {
+            ...currentText,
+            content: updatedHTML
+          }
+        };
         if (element.type === 'text') {
           const el = editableRef.current;
           const originalHeight = el.style.height;
@@ -139,7 +160,26 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
 
     if (editableRef.current) {
       const updatedHTML = editableRef.current.innerHTML;
-      let updates: Partial<CanvasElement> = { text: updatedHTML };
+      const currentText = rawElement.text || {
+        content: '',
+        fontFamily: "'Google Sans Text'",
+        fontSize: 16,
+        fontWeight: 400,
+        fontStyle: 'normal',
+        textDecoration: 'none',
+        color: 'var(--text-primary)',
+        align: 'center',
+        verticalAlign: 'middle',
+        lineHeight: 1.5,
+        letterSpacing: 0,
+        padding: { top: 10, right: 14, bottom: 10, left: 14 }
+      };
+      const updates: Partial<CanvasElement> = {
+        text: {
+          ...currentText,
+          content: updatedHTML
+        }
+      };
       
       if (element.type === 'text') {
         const el = editableRef.current;
@@ -593,8 +633,6 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
         const ratio = startElement.current.w / startElement.current.h;
         let newW = startElement.current.w;
         let newH = startElement.current.h;
-        let newX = startElement.current.x;
-        let newY = startElement.current.y;
 
         if (moveEvent.altKey) {
           const dragX = handle.includes('w') ? -finalDx : finalDx;
@@ -619,12 +657,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
           }
         }
 
-        if (handle.includes('w')) {
-          newX = startElement.current.x + (startElement.current.w - newW);
-        }
-        if (handle.includes('n')) {
-          newY = startElement.current.y + (startElement.current.h - newH);
-        }
+
 
         if (newW >= 2 && newH >= 2) {
           const scaleW = newW / startElement.current.w;
@@ -883,14 +916,14 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
                 if (target) {
                   const targetEl = elements.find(el => el.id === target);
                   if (targetEl) {
-                    updateElement(target, { isDisabled: !targetEl.isDisabled });
+                    updateElement(target, { disabled: !targetEl.disabled });
                   }
                 }
               } else if (action === 'toggleVisibility') {
                 if (target) {
                   const targetEl = elements.find(el => el.id === target);
                   if (targetEl) {
-                    updateElement(target, { isHidden: !targetEl.isHidden });
+                    updateElement(target, { visible: !targetEl.visible });
                   }
                 }
               } else if (action === 'triggerFlow') {
@@ -1183,7 +1216,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element }) => {
       case 'icon': {
         const svgPath = getIconSvgPath(element.iconName || 'home');
         return (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justify: 'center' }}>
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg 
               viewBox="0 0 24 24" 
               width="100%" 

@@ -4,6 +4,15 @@ import { useBuilder } from '../BuilderContext';
 import { CustomColorPicker } from './CustomColorPicker';
 import { AlignLeft, AlignCenter, AlignRight, AlignJustify, Settings, X } from 'lucide-react';
 import { ICON_MAP } from '../icons';
+import { Connection } from '../types';
+import { compat } from '../models/compat';
+import { FillPanel } from './panels/FillPanel';
+import { StrokePanel } from './panels/StrokePanel';
+import { ShadowPanel } from './panels/ShadowPanel';
+import { TextPanel } from './panels/TextPanel';
+import { ArrangePanel } from './panels/ArrangePanel';
+import { AnimationPanel } from './panels/AnimationPanel';
+import { getConnectionArrow, getConnectionStroke } from '../models/Connection';
 
 const Divider = () => <div style={{ height: '1px', background: '#2d2e3e', margin: '10px 0' }} />;
 
@@ -20,10 +29,38 @@ const Toggle = ({ label, checked, onChange, color = '#4caf50' }: { label: string
   </div>
 );
 
+const Accordion = ({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) => {
+  const [isOpen, setIsOpen] = React.useState(defaultOpen);
+  return (
+    <div style={{ marginBottom: '8px', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        style={{ 
+          padding: '8px 12px', 
+          background: 'var(--panel-header-bg)', 
+          cursor: 'pointer', 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          userSelect: 'none'
+        }}
+      >
+        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{title}</span>
+        <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{isOpen ? '▼' : '▶'}</span>
+      </div>
+      {isOpen && (
+        <div style={{ padding: '12px', background: 'var(--bg-toolbar)', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 
 export const PropertiesPanel: React.FC = () => {
-  const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, isPresenting, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory } = useBuilder();
+  const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory } = useBuilder();
 
   const lastSelectedId = selectedIds[selectedIds.length - 1];
   const selectedElement = elements.find(el => el.id === lastSelectedId);
@@ -31,8 +68,29 @@ export const PropertiesPanel: React.FC = () => {
   const [modalOpen, setModalOpen] = React.useState(false);
   const [previewMode, setPreviewMode] = React.useState(false);
   const [htmlCode, setHtmlCode] = React.useState('');
+  const [previewUrl, setPreviewUrl] = React.useState('');
+
+  React.useEffect(() => {
+    if (!modalOpen || !previewMode || !htmlCode) {
+      setPreviewUrl('');
+      return;
+    }
+
+    const blob = new Blob([htmlCode], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    setPreviewUrl(url);
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [htmlCode, modalOpen, previewMode]);
 
   const handleGenerate = () => { setHtmlCode(exportHTML()); setModalOpen(true); };
+  const handlePreview = () => {
+    setHtmlCode(exportHTML());
+    setPreviewMode(true);
+    setModalOpen(true);
+  };
   const handleCopy = () => { navigator.clipboard.writeText(htmlCode); };
 
   // --- Export Modal ---
@@ -50,7 +108,7 @@ export const PropertiesPanel: React.FC = () => {
           </div>
           {previewMode ? (
             <div style={{ flex: 1, backgroundColor: '#000', borderRadius: '8px', overflow: 'hidden', border: '1px solid #2d2e3e' }}>
-              <iframe srcDoc={htmlCode} style={{ width: '100%', height: '100%', border: 'none' }} title="Preview" sandbox="allow-scripts allow-same-origin" />
+              <iframe key={previewUrl} src={previewUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="Preview" sandbox="allow-scripts allow-same-origin" />
             </div>
           ) : (
             <>
@@ -140,6 +198,19 @@ export const PropertiesPanel: React.FC = () => {
   if (selectedConnectionId) {
     const sc = connections.find(c => c.id === selectedConnectionId);
     if (!sc) return null;
+    const connStroke = getConnectionStroke(sc);
+    const connArrow = getConnectionArrow(sc);
+    const updateConnectionStroke = (updates: Partial<typeof connStroke>) => {
+      updateConnection(sc.id, { stroke: { ...connStroke, ...updates } });
+    };
+    const updateConnectionArrow = (updates: Partial<typeof connArrow>) => {
+      const nextArrow = { ...connArrow, ...updates };
+      updateConnection(sc.id, {
+        arrow: nextArrow,
+        startArrow: nextArrow.start === 'arrow' ? 'arrow' : 'none',
+        endArrow: nextArrow.end === 'arrow' ? 'arrow' : 'none',
+      });
+    };
     return (
       <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`} onFocus={saveHistory}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -231,13 +302,29 @@ export const PropertiesPanel: React.FC = () => {
         
         <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
           <div style={{ flex: 2 }}><Label>Font</Label><select value={sc.fontFamily || 'sans-serif'} onChange={(e) => updateConnection(sc.id, { fontFamily: e.target.value })}>{fontOptions}</select></div>
-          <div style={{ flex: 1 }}><Label>Size</Label><input type="number" value={sc.fontSize || 14} onChange={(e) => updateConnection(sc.id, { fontSize: parseInt(e.target.value) || 14 })} /></div>
+          <div style={{ flex: 1 }}><Label>Label Size</Label><input type="number" value={sc.fontSize || 14} onChange={(e) => updateConnection(sc.id, { fontSize: parseInt(e.target.value) || 14 })} /></div>
         </div>
         <div style={{ marginTop: '6px' }}>
           <CustomColorPicker label="Text Color" name="color" value={sc.color || '#e0e0e0'} onChange={(e) => updateConnection(sc.id, { color: e.target.value })} onTransparent={() => updateConnection(sc.id, { color: 'transparent' })} />
         </div>
 
+        <Divider />
+        <Label>Line Style</Label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
+          <div><Label>Path</Label><select value={connStroke.lineType} onChange={(e) => updateConnectionStroke({ lineType: e.target.value as any })}><option value="curve">Curve</option><option value="straight">Straight</option><option value="elbow">Elbow</option></select></div>
+          <div><Label>Stroke</Label><select value={connStroke.style} onChange={(e) => updateConnectionStroke({ style: e.target.value as any })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></div>
+          <div><Label>Width</Label><input type="number" min={1} max={20} value={connStroke.width} onChange={(e) => updateConnectionStroke({ width: Math.max(1, parseInt(e.target.value) || 1) })} /></div>
+          <div><Label>Arrow Size</Label><input type="number" min={4} max={24} value={connArrow.size} onChange={(e) => updateConnectionArrow({ size: Math.max(4, parseInt(e.target.value) || 4) })} /></div>
+        </div>
+        <div style={{ marginTop: '6px' }}>
+          <CustomColorPicker label="Line Color" name="lineColor" value={connStroke.color} onChange={(e) => updateConnectionStroke({ color: e.target.value })} onTransparent={() => updateConnectionStroke({ color: 'transparent' })} />
+        </div>
         <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+          <div style={{ flex: 1 }}><Label>Start Arrow</Label><select value={connArrow.start} onChange={(e) => updateConnectionArrow({ start: e.target.value as any })}><option value="none">None</option><option value="arrow">Arrow</option><option value="triangle">Triangle</option><option value="circle">Circle</option><option value="diamond">Diamond</option></select></div>
+          <div style={{ flex: 1 }}><Label>End Arrow</Label><select value={connArrow.end} onChange={(e) => updateConnectionArrow({ end: e.target.value as any })}><option value="none">None</option><option value="arrow">Arrow</option><option value="triangle">Triangle</option><option value="circle">Circle</option><option value="diamond">Diamond</option></select></div>
+        </div>
+
+        <div style={{ display: 'none', gap: '6px', marginTop: '6px' }}>
           <div style={{ flex: 1 }}><Label>Start</Label><select value={sc.startArrow || 'none'} onChange={(e) => updateConnection(sc.id, { startArrow: e.target.value as any })}><option value="none">—</option><option value="arrow">Arrow</option></select></div>
           <div style={{ flex: 1 }}><Label>End</Label><select value={sc.endArrow || 'none'} onChange={(e) => updateConnection(sc.id, { endArrow: e.target.value as any })}><option value="none">—</option><option value="arrow">Arrow</option></select></div>
         </div>
@@ -308,7 +395,14 @@ export const PropertiesPanel: React.FC = () => {
     });
   };
 
-  const el = selectedElement as any;
+  const handlePanelChange = (updates: any) => {
+    saveHistory();
+    selectedIds.forEach(id => {
+      updateElement(id, updates);
+    });
+  };
+
+  const el = selectedElement ? compat(selectedElement) as any : null;
 
   const renderAlignmentToolbar = (elementToAlign: any) => {
     if (!elementToAlign) return null;
@@ -475,7 +569,7 @@ export const PropertiesPanel: React.FC = () => {
           <button onClick={() => setIsPresenting(true)} className="btn" style={{ width: '100%', padding: '8px', background: '#3f51b5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Present Slideshow</button>
           <div style={{ display: 'flex', gap: '6px' }}>
             <button onClick={removeSelected} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Delete Selected</button>
-            <button onClick={() => { setHtmlCode(exportHTML()); setPreviewMode(true); setModalOpen(true); }} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Preview</button>
+            <button onClick={handlePreview} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Preview</button>
             <button onClick={handleGenerate} style={{ flex: 1, padding: '8px', background: '#4caf50', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Export</button>
           </div>
         </div>
@@ -487,237 +581,301 @@ export const PropertiesPanel: React.FC = () => {
   return (
     <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`} onFocus={saveHistory}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{el.type.charAt(0).toUpperCase() + el.type.slice(1)}</span>
-          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{el.id.substring(0, 8)}</span>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{selectedElement!.type.toUpperCase()}</span>
+          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{selectedElement!.id.substring(0, 8)}</span>
         </div>
         <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Hide Panel"><X size={16} /></button>
       </div>
 
-      <Divider />
-
-      {/* Flags */}
-      <Label>Properties</Label>
-      <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '6px 14px', border: '1px solid var(--border-color)', marginBottom: '8px' }}>
-        {el.parentId && <Toggle label="Fill Parent" checked={!!el.fillParent} onChange={(v) => handleToggle('fillParent', v)} />}
-        <Toggle label="Lock Position" checked={!!el.isLocked} onChange={(v) => handleToggle('isLocked', v)} color="#e91e63" />
-        <Toggle label="Disabled" checked={!!el.isDisabled} onChange={(v) => handleToggle('isDisabled', v)} color="#ef5350" />
-        <Toggle label="Hidden" checked={!!el.isHidden} onChange={(v) => handleToggle('isHidden', v)} color="#ff9800" />
-        <Toggle label="Pinned" checked={!!el.isPinned} onChange={(v) => handleToggle('isPinned', v)} color="#ab47bc" />
-        <Toggle label="Interactive Btns" checked={!!el.enableExpandButton} onChange={(v) => handleToggle('enableExpandButton', v)} color="#42a5f5" />
-      </div>
-
-      <Divider />
-
-      {/* Position */}
-      <Label>Position & Size</Label>
-      {el.type === 'node' && (
-        <input type="text" name="title" value={el.title || ''} onChange={handleChange} placeholder="Title..." style={{ marginBottom: '6px' }} />
-      )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', marginTop: '8px' }}>
-        <div><div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>X</div><input type="number" name="x" value={Math.round(el.x)} onChange={handleChange} disabled={!!el.fillParent} /></div>
-        <div><div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>Y</div><input type="number" name="y" value={Math.round(el.y)} onChange={handleChange} disabled={!!el.fillParent} /></div>
-        <div><div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>W</div><input type="number" name="width" value={Math.round(el.width)} onChange={handleChange} disabled={!!el.fillParent} min={10} /></div>
-        <div><div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 600 }}>H</div><input type="number" name="height" value={Math.round(el.height)} onChange={handleChange} disabled={!!el.fillParent} min={10} /></div>
-      </div>
-
-      <Divider />
-
-      {/* Type-specific */}
-      {el.type === 'text' && (<>
-        <Label>Content</Label>
-        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', padding: '6px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', border: '1px dashed var(--border-color)', marginBottom: '8px', textAlign: 'center' }}>
-          Double-click element on canvas to edit text & formatting
-        </div>
-        <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
-          <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
-          <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 16} onChange={handleChange} /></div>
-        </div>
-        {renderAlignmentToolbar(el)}
-        <div style={{ marginTop: '12px' }}>
-          <CustomColorPicker label="Text" name="color" value={el.color} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
-          <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
-          <CustomColorPicker label="Line" name="borderColor" value={el.borderColor || 'transparent'} onChange={handleChange} onTransparent={() => updateElement(el.id, { borderColor: 'transparent' })} />
-        </div>
-        <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-          <div style={{ flex: 1 }}><Label>Border W</Label><input type="number" name="borderWidth" value={el.borderWidth || 0} onChange={handleChange} min={0} /></div>
-          <div style={{ flex: 1 }}><Label>Radius</Label><input type="number" name="borderRadius" value={el.borderRadius || 0} onChange={handleChange} min={0} /></div>
-        </div>
-      </>)}
-
-      {el.type === 'button' && (<>
-        <Label>Label</Label>
-        <input type="text" name="text" value={el.text} onChange={handleChange} />
-        <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
-          <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
-          <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 16} onChange={handleChange} /></div>
-        </div>
-        {renderAlignmentToolbar(el)}
-        <Label>Action</Label>
-        <select name="actionType" value={el.actionType} onChange={handleChange}>
-          <option value="alert">Alert</option>
-          <option value="link">Link (URL)</option>
-          <option value="toggleDisabled">Toggle Disabled State</option>
-          <option value="toggleVisibility">Toggle Visibility</option>
-          <option value="triggerFlow">Trigger Flow (Reveal Cascade)</option>
-          <option value="nextSlide">Next Slide</option>
-          <option value="prevSlide">Previous Slide</option>
-          <option value="goToSlide">Go to Slide</option>
-        </select>
-        {el.actionType === 'link' ? (
-          <>
-            <Label>URL</Label>
-            <input type="text" name="link" value={el.link} onChange={handleChange} />
-          </>
-        ) : el.actionType === 'goToSlide' ? (
-          <>
-            <Label>Target Slide (Node)</Label>
-            <select name="actionTarget" value={el.actionTarget} onChange={handleChange}>
-              <option value="">—</option>
-              {elements
-                .filter(x => x.type === 'node' && (x as any).isSlide !== false)
-                .map(x => (
-                  <option key={x.id} value={x.id}>
-                    Slide: {x.title || x.id.substring(0, 6)}
-                  </option>
-                ))}
-            </select>
-          </>
-        ) : (el.actionType === 'triggerFlow' || el.actionType === 'toggleVisibility' || el.actionType === 'toggleDisabled') ? (
-          <>
-            <Label>Target Element</Label>
-            <select name="actionTarget" value={el.actionTarget} onChange={handleChange}>
-              <option value="">—</option>
-              {elements
-                .filter(x => x.id !== el.id)
-                .map(x => (
-                  <option key={x.id} value={x.id}>
-                    {x.type.toUpperCase()}: {x.title || (x as any).text || x.id.substring(0, 6)}
-                  </option>
-                ))}
-            </select>
-          </>
-        ) : (el.actionType === 'nextSlide' || el.actionType === 'prevSlide') ? (
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', fontStyle: 'italic' }}>
-            Navigates slideshow when clicked.
-          </div>
-        ) : (
-          <>
-            <Label>Message</Label>
-            <input type="text" name="actionTarget" value={el.actionTarget} onChange={handleChange} />
-          </>
-        )}
-        <div style={{ marginTop: '12px' }}>
-          <CustomColorPicker label="Text" name="color" value={el.color || '#ffffff'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
-          <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
-          <CustomColorPicker label="Line" name="borderColor" value={el.borderColor || 'transparent'} onChange={handleChange} onTransparent={() => updateElement(el.id, { borderColor: 'transparent' })} />
-        </div>
-        <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-          <div style={{ flex: 1 }}><Label>Radius</Label><input type="number" name="borderRadius" value={el.borderRadius || 0} onChange={handleChange} min={0} /></div>
-        </div>
-      </>)}
-
-      {el.type === 'image' && (<>
-        <Label>Title</Label><input type="text" name="title" value={el.title || ''} onChange={handleChange} />
-        <Label>URL</Label><input type="text" name="src" value={el.src} onChange={handleChange} />
-        <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
-          <div style={{ flex: 2 }}><Label>Fit</Label><select name="objectFit" value={el.objectFit} onChange={handleChange}><option value="contain">Contain</option><option value="cover">Cover</option><option value="fill">Fill</option></select></div>
-          <div style={{ flex: 1 }}><Label>Font</Label><input type="number" name="fontSize" value={el.fontSize || 11} onChange={handleChange} /></div>
-        </div>
-      </>)}
-
-      {el.type === 'video' && (<>
-        <Label>Title</Label><input type="text" name="title" value={el.title || ''} onChange={handleChange} />
-        <Label>Video URL</Label><input type="text" name="src" value={el.src} onChange={handleChange} placeholder="YouTube / Drive" />
-      </>)}
-
-      {el.type === 'node' && (<>
-        <div style={{ display: 'flex', gap: '4px' }}>
-          <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
-          <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 14} onChange={handleChange} /></div>
-        </div>
-        <div style={{ marginTop: '12px' }}>
-          <CustomColorPicker label="Text" name="color" value={el.color || '#ffffff'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
-          <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
-        </div>
-        <div style={{ marginTop: '8px' }}>
-          <Toggle label="Include in Presentation" checked={el.isSlide !== false} onChange={(v) => handleToggle('isSlide', v)} color="#3f51b5" />
-        </div>
-      </>)}
-
-      {el.type === 'icon' && (<>
-        <Label>Icon Name</Label>
-        <select name="iconName" value={el.iconName || 'home'} onChange={handleChange}>
-          {Object.keys(ICON_MAP).map(name => (
-            <option key={name} value={name}>{name.toUpperCase()}</option>
-          ))}
-        </select>
-        <div style={{ marginTop: '12px' }}>
-          <CustomColorPicker label="Color" name="color" value={el.color || '#ffffff'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
-        </div>
-      </>)}
-
-      {el.type === 'shape' && (<>
-        <Label>Shape Type</Label>
-        <select name="shapeType" value={el.shapeType} onChange={handleChange}>
-          <option value="rectangle">Rectangle</option>
-          <option value="ellipse">Circle / Ellipse</option>
-          <option value="line">Line</option>
-          <option value="arrow">Arrow</option>
-          <option value="elbow">Elbow Connector</option>
-          <option value="triangle">Triangle</option>
-          <option value="rightTriangle">Right Triangle</option>
-          <option value="diamond">Diamond</option>
-          <option value="pentagon">Pentagon</option>
-          <option value="hexagon">Hexagon</option>
-          <option value="star">Star</option>
-          <option value="parallelogram">Parallelogram</option>
-          <option value="trapezoid">Trapezoid</option>
-          <option value="arrowRight">Arrow Right</option>
-          <option value="arrowLeft">Arrow Left</option>
-          <option value="arrowUp">Arrow Up</option>
-          <option value="arrowDown">Arrow Down</option>
-        </select>
-
-        <Label>Text Inside Shape</Label>
-        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', padding: '6px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', border: '1px dashed var(--border-color)', marginBottom: '8px', textAlign: 'center' }}>
-          Double-click shape on canvas to edit text & formatting
-        </div>
-
-        <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
-          <div style={{ flex: 2 }}><Label>Font</Label><select name="fontFamily" value={el.fontFamily || 'sans-serif'} onChange={handleChange}>{fontOptions}</select></div>
-          <div style={{ flex: 1 }}><Label>Size</Label><input type="number" name="fontSize" value={el.fontSize || 14} onChange={handleChange} /></div>
-        </div>
-        {renderAlignmentToolbar(el)}
-
-        <div style={{ marginTop: '12px' }}>
-          <CustomColorPicker label="Text" name="color" value={el.color || '#e0e0e0'} onChange={handleChange} onTransparent={() => updateElement(el.id, { color: 'transparent' })} />
-          <CustomColorPicker label="Fill" name="backgroundColor" value={el.backgroundColor} onChange={handleChange} onTransparent={() => updateElement(el.id, { backgroundColor: 'transparent' })} />
-          <CustomColorPicker label="Line" name="borderColor" value={el.borderColor || 'transparent'} onChange={handleChange} onTransparent={() => updateElement(el.id, { borderColor: 'transparent' })} />
-        </div>
-
-        <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-          <div style={{ flex: 1 }}>
-            <Label>{['line', 'arrow', 'elbow'].includes(el.shapeType) ? 'Line Width' : 'Border W'}</Label>
-            <input type="number" name="borderWidth" value={el.borderWidth || 0} onChange={handleChange} min={0} />
-          </div>
-          {!['line', 'arrow', 'elbow'].includes(el.shapeType) && (
-            <div style={{ flex: 1 }}>
-              <Label>Radius</Label>
-              <input type="number" name="borderRadius" value={el.borderRadius || 0} onChange={handleChange} min={0} />
+      <div style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
+        {/* Size & Position */}
+        <Accordion title="Size & Position" defaultOpen={true}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600 }}>Element Name</div>
+            <input 
+              type="text" 
+              value={selectedElement!.name || ''} 
+              onChange={(e) => handlePanelChange({ name: e.target.value })} 
+              placeholder="Name..." 
+              style={{ width: '100%' }}
+            />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', marginTop: '4px' }}>
+              <div><div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>X</div><input type="number" value={Math.round(selectedElement!.x)} onChange={(e) => handlePanelChange({ x: parseFloat(e.target.value) || 0 })} disabled={!!selectedElement!.fillParent} /></div>
+              <div><div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>Y</div><input type="number" value={Math.round(selectedElement!.y)} onChange={(e) => handlePanelChange({ y: parseFloat(e.target.value) || 0 })} disabled={!!selectedElement!.fillParent} /></div>
+              <div><div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>W</div><input type="number" value={Math.round(selectedElement!.width)} onChange={(e) => handlePanelChange({ width: Math.max(10, parseFloat(e.target.value) || 10) })} disabled={!!selectedElement!.fillParent} min={10} /></div>
+              <div><div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>H</div><input type="number" value={Math.round(selectedElement!.height)} onChange={(e) => handlePanelChange({ height: Math.max(10, parseFloat(e.target.value) || 10) })} disabled={!!selectedElement!.fillParent} min={10} /></div>
             </div>
-          )}
-        </div>
-      </>)}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+              <div style={{ fontSize: '11px', color: '#8c8d9c', width: '50px' }}>Rotation</div>
+              <input 
+                type="number" 
+                value={selectedElement!.rotation || 0} 
+                onChange={(e) => handlePanelChange({ rotation: parseInt(e.target.value) || 0 })} 
+                style={{ flex: 1 }}
+              />
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>°</span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div style={{ fontSize: '11px', color: '#8c8d9c', width: '50px' }}>Opacity</div>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                value={Math.round((selectedElement!.opacity ?? 1) * 100)} 
+                onChange={(e) => handlePanelChange({ opacity: parseFloat(e.target.value) / 100 })} 
+                style={{ flex: 1 }}
+              />
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', width: '30px', textAlign: 'right' }}>{Math.round((selectedElement!.opacity ?? 1) * 100)}%</span>
+            </div>
+          </div>
+        </Accordion>
 
-      {/* Actions */}
-      <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <button onClick={() => setIsPresenting(true)} className="btn" style={{ width: '100%', padding: '8px', background: '#3f51b5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Present Slideshow</button>
+        {/* Arrange & Ordering */}
+        <Accordion title="Arrange & Layers" defaultOpen={false}>
+          <ArrangePanel elementIds={[selectedElement!.id]} />
+        </Accordion>
+
+        {/* Animations */}
+        <Accordion title="Animations" defaultOpen={false}>
+          <AnimationPanel element={selectedElement!} onChange={handlePanelChange} />
+        </Accordion>
+
+        {/* Fill (Only for nodes, shapes, texts, buttons) */}
+        {['node', 'shape', 'text', 'button'].includes(selectedElement!.type) && (
+          <Accordion title="Fill / Background" defaultOpen={true}>
+            <FillPanel element={selectedElement!} onChange={handlePanelChange} />
+          </Accordion>
+        )}
+
+        {/* Border & Corners (Only for nodes, shapes, texts, buttons, images, videos) */}
+        {['node', 'shape', 'text', 'button', 'image', 'video'].includes(selectedElement!.type) && (
+          <Accordion title="Border & Corners" defaultOpen={true}>
+            <StrokePanel element={selectedElement!} onChange={handlePanelChange} />
+          </Accordion>
+        )}
+
+        {/* Shadow (Only for nodes, shapes, images, videos) */}
+        {['node', 'shape', 'image', 'video'].includes(selectedElement!.type) && (
+          <Accordion title="Drop Shadow" defaultOpen={false}>
+            <ShadowPanel element={selectedElement!} onChange={handlePanelChange} />
+          </Accordion>
+        )}
+
+        {/* Text Styling (Only for elements that support text) */}
+        {['text', 'button', 'shape', 'node'].includes(selectedElement!.type) && (
+          <Accordion title="Text Formatting" defaultOpen={true}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {selectedElement!.type === 'text' && (
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', padding: '6px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', border: '1px dashed var(--border-color)', marginBottom: '6px', textAlign: 'center' }}>
+                  Double-click text box on canvas to edit text content
+                </div>
+              )}
+              {selectedElement!.type === 'shape' && (
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', padding: '6px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', border: '1px dashed var(--border-color)', marginBottom: '6px', textAlign: 'center' }}>
+                  Double-click shape on canvas to edit text content
+                </div>
+              )}
+              <TextPanel element={selectedElement!} onChange={handlePanelChange} />
+            </div>
+          </Accordion>
+        )}
+
+        {/* Flags / Properties */}
+        <Accordion title="Properties & Flags" defaultOpen={false}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {selectedElement!.parentId && <Toggle label="Fill Parent" checked={!!selectedElement!.fillParent} onChange={(v) => handlePanelChange({ fillParent: v })} />}
+            <Toggle label="Lock Position" checked={!!selectedElement!.locked} onChange={(v) => handlePanelChange({ locked: v })} color="#e91e63" />
+            <Toggle label="Disabled" checked={!!selectedElement!.disabled} onChange={(v) => handlePanelChange({ disabled: v })} color="#ef5350" />
+            <Toggle label="Hidden" checked={!selectedElement!.visible} onChange={(v) => handlePanelChange({ visible: !v })} color="#ff9800" />
+            <Toggle label="Pinned" checked={!!selectedElement!.pinned} onChange={(v) => handlePanelChange({ pinned: v })} color="#ab47bc" />
+            <Toggle label="Interactive Btns" checked={!!selectedElement!.interactive} onChange={(v) => handlePanelChange({ interactive: v })} color="#42a5f5" />
+            {selectedElement!.type === 'node' && (
+              <Toggle label="Include in Presentation" checked={selectedElement!.isSlide !== false} onChange={(v) => handlePanelChange({ isSlide: v })} color="#3f51b5" />
+            )}
+          </div>
+        </Accordion>
+
+        {/* Button Actions */}
+        {selectedElement!.type === 'button' && (
+          <Accordion title="Button Action" defaultOpen={true}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600 }}>Action Type</div>
+              <select 
+                value={el.actionType || 'alert'} 
+                onChange={(e) => handlePanelChange({ actionType: e.target.value })}
+                style={{ width: '100%', padding: '4px' }}
+              >
+                <option value="alert">Alert</option>
+                <option value="link">Link (URL)</option>
+                <option value="toggleDisabled">Toggle Disabled State</option>
+                <option value="toggleVisibility">Toggle Visibility</option>
+                <option value="triggerFlow">Trigger Flow (Reveal Cascade)</option>
+                <option value="nextSlide">Next Slide</option>
+                <option value="prevSlide">Previous Slide</option>
+                <option value="goToSlide">Go to Slide</option>
+              </select>
+
+              {el.actionType === 'link' && (
+                <>
+                  <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, marginTop: '4px' }}>URL</div>
+                  <input type="text" value={el.link || ''} onChange={(e) => handlePanelChange({ link: e.target.value })} style={{ width: '100%' }} />
+                </>
+              )}
+
+              {el.actionType === 'goToSlide' && (
+                <>
+                  <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, marginTop: '4px' }}>Target Slide (Node)</div>
+                  <select 
+                    value={el.actionTarget || ''} 
+                    onChange={(e) => handlePanelChange({ actionTarget: e.target.value })}
+                    style={{ width: '100%', padding: '4px' }}
+                  >
+                    <option value="">—</option>
+                    {elements
+                      .filter(x => x.type === 'node' && (x as any).isSlide !== false)
+                      .map(x => (
+                        <option key={x.id} value={x.id}>
+                          Slide: {x.name || x.id.substring(0, 6)}
+                        </option>
+                      ))}
+                  </select>
+                </>
+              )}
+
+              {['triggerFlow', 'toggleVisibility', 'toggleDisabled'].includes(el.actionType) && (
+                <>
+                  <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, marginTop: '4px' }}>Target Element</div>
+                  <select 
+                    value={el.actionTarget || ''} 
+                    onChange={(e) => handlePanelChange({ actionTarget: e.target.value })}
+                    style={{ width: '100%', padding: '4px' }}
+                  >
+                    <option value="">—</option>
+                    {elements
+                      .filter(x => x.id !== selectedElement!.id)
+                      .map(x => (
+                        <option key={x.id} value={x.id}>
+                          {x.type.toUpperCase()}: {x.name || x.id.substring(0, 6)}
+                        </option>
+                      ))}
+                  </select>
+                </>
+              )}
+
+              {el.actionType === 'alert' && (
+                <>
+                  <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, marginTop: '4px' }}>Alert Message</div>
+                  <input type="text" value={el.actionTarget || ''} onChange={(e) => handlePanelChange({ actionTarget: e.target.value })} style={{ width: '100%' }} />
+                </>
+              )}
+            </div>
+          </Accordion>
+        )}
+
+        {/* Shapes Configuration */}
+        {selectedElement!.type === 'shape' && (
+          <Accordion title="Shape Settings" defaultOpen={true}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600 }}>Shape Type</div>
+              <select 
+                value={el.shapeType || 'rectangle'} 
+                onChange={(e) => handlePanelChange({ shapeType: e.target.value })}
+                style={{ width: '100%', padding: '4px' }}
+              >
+                <option value="rectangle">Rectangle</option>
+                <option value="ellipse">Circle / Ellipse</option>
+                <option value="line">Line</option>
+                <option value="arrow">Arrow</option>
+                <option value="elbow">Elbow Connector</option>
+                <option value="triangle">Triangle</option>
+                <option value="rightTriangle">Right Triangle</option>
+                <option value="diamond">Diamond</option>
+                <option value="pentagon">Pentagon</option>
+                <option value="hexagon">Hexagon</option>
+                <option value="star">Star</option>
+                <option value="parallelogram">Parallelogram</option>
+                <option value="trapezoid">Trapezoid</option>
+                <option value="arrowRight">Arrow Right</option>
+                <option value="arrowLeft">Arrow Left</option>
+                <option value="arrowUp">Arrow Up</option>
+                <option value="arrowDown">Arrow Down</option>
+              </select>
+            </div>
+          </Accordion>
+        )}
+
+        {/* Media (Image / Video) */}
+        {['image', 'video'].includes(selectedElement!.type) && (
+          <Accordion title="Media Settings" defaultOpen={true}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600 }}>URL</div>
+              <input 
+                type="text" 
+                value={el.src || ''} 
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const driveMatch = val.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/) || val.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+                  let finalVal = val;
+                  if (driveMatch && driveMatch[1]) {
+                    if (selectedElement!.type === 'image') finalVal = `https://lh3.googleusercontent.com/d/${driveMatch[1]}`;
+                    else if (selectedElement!.type === 'video') finalVal = `https://drive.google.com/file/d/${driveMatch[1]}/preview`;
+                  }
+                  handlePanelChange({ src: finalVal });
+                }} 
+                style={{ width: '100%' }}
+                placeholder="https://..."
+              />
+              {selectedElement!.type === 'image' && (
+                <>
+                  <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, marginTop: '4px' }}>Alt Text</div>
+                  <input type="text" value={el.alt || ''} onChange={(e) => handlePanelChange({ alt: e.target.value })} style={{ width: '100%' }} />
+                  <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, marginTop: '4px' }}>Object Fit</div>
+                  <select value={el.objectFit || 'cover'} onChange={(e) => handlePanelChange({ objectFit: e.target.value })} style={{ width: '100%', padding: '4px' }}>
+                    <option value="contain">Contain</option>
+                    <option value="cover">Cover</option>
+                    <option value="fill">Fill</option>
+                  </select>
+                </>
+              )}
+            </div>
+          </Accordion>
+        )}
+
+        {/* Icon Configuration */}
+        {selectedElement!.type === 'icon' && (
+          <Accordion title="Icon Settings" defaultOpen={true}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600 }}>Icon Name</div>
+              <select 
+                value={el.iconName || 'home'} 
+                onChange={(e) => handlePanelChange({ iconName: e.target.value })}
+                style={{ width: '100%', padding: '4px' }}
+              >
+                {Object.keys(ICON_MAP).map(name => (
+                  <option key={name} value={name}>{name.toUpperCase()}</option>
+                ))}
+              </select>
+              <CustomColorPicker 
+                label="Icon Color" 
+                name="iconColor" 
+                value={el.iconColor || 'var(--text-primary)'} 
+                onChange={(e) => handlePanelChange({ iconColor: e.target.value })} 
+                onTransparent={() => handlePanelChange({ iconColor: 'transparent' })} 
+              />
+            </div>
+          </Accordion>
+        )}
+      </div>
+
+      {/* Panel Footer Actions */}
+      <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0 }}>
+        <button onClick={() => setIsPresenting(true)} className="btn" style={{ width: '100%', padding: '10px', background: '#3f51b5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Present Slideshow</button>
         <div style={{ display: 'flex', gap: '6px' }}>
-          <button onClick={() => removeElement(el.id)} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Delete</button>
-          <button onClick={() => { setHtmlCode(exportHTML()); setPreviewMode(true); setModalOpen(true); }} style={{ flex: 1, padding: '8px', background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>Preview</button>
-          <button onClick={handleGenerate} style={{ flex: 1, padding: '8px', background: '#4caf50', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Export</button>
+          <button onClick={() => removeElement(selectedElement!.id)} style={{ flex: 1, padding: '10px', background: 'none', border: '1px solid var(--border-color)', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}>Delete</button>
+          <button onClick={handlePreview} style={{ flex: 1, padding: '10px', background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}>Preview</button>
+          <button onClick={handleGenerate} className="btn primary" style={{ flex: 1, padding: '10px' }}>Export</button>
         </div>
       </div>
       {renderExportModal()}
