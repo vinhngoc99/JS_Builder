@@ -344,7 +344,7 @@ Error generating stack: `+e.message+`
           const connections = ${M(s)};
           const originalElements = JSON.parse(JSON.stringify(elements));
           const originalEditBrushHTML = document.getElementById('edit-brush-layer') ? document.getElementById('edit-brush-layer').innerHTML : '';
-          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step';
+          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step', lastRightClickReset = { id: null, time: 0 };
           let isLaserActive = false, laserPos = { x: -100, y: -100 }, laserTrail = [];
 
           const brushCursorEl = document.getElementById('brush-cursor-el');
@@ -502,6 +502,30 @@ Error generating stack: `+e.message+`
             });
           }
 
+          function resetElementPosition(id) {
+            const current = elements.find(el => el.id === id);
+            const original = originalElements.find(el => el.id === id);
+            const wrapper = document.getElementById('el-wrapper-' + id);
+            if (!current || !original || !wrapper) return false;
+
+            const dx = original.x - current.x;
+            const dy = original.y - current.y;
+            current.x = original.x;
+            current.y = original.y;
+            wrapper.style.left = original.x + 'px';
+            wrapper.style.top = original.y + 'px';
+
+            if (current.type === 'node' && (dx !== 0 || dy !== 0)) {
+              document.querySelectorAll('path[data-attached-node-id="' + id + '"]').forEach(path => {
+                translateBrushPath(path, dx, dy);
+              });
+            }
+
+            updateConnections();
+            showNotification('Element position reset');
+            return true;
+          }
+
           window.showNotification = function(msg) {
             const toast = document.getElementById('notification-toast');
             document.getElementById('notification-text').innerText = msg;
@@ -649,6 +673,23 @@ Error generating stack: `+e.message+`
             updateAutoplayUI();
           }
 
+          function isAutoplayOwnerVisible(owner) {
+            if (!owner) return false;
+            if (owner.classList.contains('is-hidden') || owner.classList.contains('disabled')) return false;
+            if (owner.closest('.is-hidden')) return false;
+            const style = window.getComputedStyle(owner);
+            return style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none';
+          }
+
+          function getAvailableAutoplayButtons() {
+            return Array.from(document.querySelectorAll('.conn-btn-group .conn-btn:not(.active):not(.clicked-hidden)'))
+              .filter(btn => {
+                if (btn.disabled) return false;
+                const owner = btn.closest('[id^="el-wrapper-"]');
+                return isAutoplayOwnerVisible(owner);
+              });
+          }
+
           async function playInstant() {
             isAutoplayActive = true;
             updateAutoplayUI();
@@ -656,14 +697,7 @@ Error generating stack: `+e.message+`
             let clickedAny = true;
             let iterations = 0;
             while (clickedAny && iterations < 500 && isAutoplayActive) {
-              const visibleNodes = Array.from(document.querySelectorAll('.is-node')).filter(el => {
-                return !el.classList.contains('is-hidden') && el.style.display !== 'none';
-              });
-              const availableBtns = [];
-              visibleNodes.forEach(node => {
-                const btns = node.querySelectorAll('.conn-btn:not(.active):not(.clicked-hidden)');
-                btns.forEach(btn => availableBtns.push(btn));
-              });
+              const availableBtns = getAvailableAutoplayButtons();
 
               if (availableBtns.length > 0) {
                 availableBtns.forEach(btn => btn.click());
@@ -679,15 +713,7 @@ Error generating stack: `+e.message+`
           function playNextStep() {
             if (!isAutoplayActive) return;
 
-            const visibleNodes = Array.from(document.querySelectorAll('.is-node')).filter(el => {
-              return !el.classList.contains('is-hidden') && el.style.display !== 'none';
-            });
-
-            const availableBtns = [];
-            visibleNodes.forEach(node => {
-              const btns = node.querySelectorAll('.conn-btn:not(.active):not(.clicked-hidden)');
-              btns.forEach(btn => availableBtns.push(btn));
-            });
+            const availableBtns = getAvailableAutoplayButtons();
 
             if (availableBtns.length > 0) {
               const btn = availableBtns[0];
@@ -1318,6 +1344,23 @@ Error generating stack: `+e.message+`
 
           container.addEventListener('pointerdown', e => {
             if (isSpaceDown) { isPanning = true; container.classList.add('panning'); startPan = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }; return; }
+            if (e.button === 2) {
+              e.preventDefault();
+              const el = e.target.closest('.draggable-element');
+              if (el) {
+                const id = el.id.replace('el-wrapper-', '');
+                const now = Date.now();
+                if (lastRightClickReset.id === id && now - lastRightClickReset.time < 550) {
+                  resetElementPosition(id);
+                  lastRightClickReset = { id: null, time: 0 };
+                } else {
+                  lastRightClickReset = { id, time: now };
+                }
+              } else {
+                lastRightClickReset = { id: null, time: 0 };
+              }
+              return;
+            }
             if (isBrushMode) {
               const r = container.getBoundingClientRect();
               const x = (e.clientX - r.left - pan.x) / scale, y = (e.clientY - r.top - pan.y) / scale;
