@@ -1104,20 +1104,32 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         .replace(/on\w+\s*=\s*(['"])(.*?)\1/gi, '');
     };
 
-    // Collect fonts used by elements
+    // Collect fonts used by elements across all variants
     const usedFonts = new Set<string>();
-    elements.forEach(el => {
-      const fontFamily = el.text?.fontFamily;
-      if (fontFamily) {
-        const clean = fontFamily.replace(/['"]/g, '').trim();
-        if (clean) usedFonts.add(clean);
-      }
-    });
-    connections.forEach(conn => {
-      if (conn.fontFamily) {
-        const clean = conn.fontFamily.replace(/['"]/g, '').trim();
-        if (clean) usedFonts.add(clean);
-      }
+    const currentActiveVariant = {
+      id: activeVariantId,
+      name: variants.find(v => v.id === activeVariantId)?.name || 'Variant 1',
+      elements,
+      connections,
+      brushStrokes,
+      guides
+    };
+    const allVariants = variants.map(v => v.id === activeVariantId ? currentActiveVariant : v);
+
+    allVariants.forEach(v => {
+      v.elements.forEach(el => {
+        const fontFamily = el.text?.fontFamily;
+        if (fontFamily) {
+          const clean = fontFamily.replace(/['"]/g, '').trim();
+          if (clean) usedFonts.add(clean);
+        }
+      });
+      v.connections.forEach(conn => {
+        if (conn.fontFamily) {
+          const clean = conn.fontFamily.replace(/['"]/g, '').trim();
+          if (clean) usedFonts.add(clean);
+        }
+      });
     });
 
     const systemFonts = new Set(['sans-serif', 'serif', 'monospace', 'arial', 'georgia', 'verdana', 'times new roman', 'courier new', 'trebuchet ms', 'impact', 'comic sans ms']);
@@ -1141,49 +1153,6 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (fontFamiliesToLoad.length > 0) {
       const familiesParam = fontFamiliesToLoad.map(f => `family=${f}`).join('&');
       fontLinkTags = `<link href="https://fonts.googleapis.com/css2?${familiesParam}&display=swap" rel="stylesheet">`;
-    }
-
-    const adj = new Map<string, Connection[]>();
-    connections.forEach(c => {
-      if (!adj.has(c.fromId)) adj.set(c.fromId, []);
-      adj.get(c.fromId)!.push(c);
-    });
-
-    const hiddenNodes = new Set<string>();
-    const hiddenConnections = new Set<string>();
-    const interactiveTargets = new Set<string>();
-    const elementsMap = new Map(elements.map(e => [e.id, e]));
-
-    // 1. Direct targets of Interactive Btns are hidden
-    elements.forEach(el => {
-      if (el.interactive) {
-        (adj.get(el.id) || []).forEach(c => {
-          interactiveTargets.add(c.toId);
-          hiddenConnections.add(c.id);
-        });
-      }
-    });
-
-    // 2. BFS to hide downstream nodes unless blocked by another Interactive Btn or Pinned
-    const visited = new Set<string>();
-    interactiveTargets.forEach(id => visited.add(id));
-    const queue = Array.from(interactiveTargets);
-    while (queue.length > 0) {
-      const curr = queue.shift()!;
-      const el = elementsMap.get(curr);
-      if (el && el.pinned) {
-        continue; // Skip hiding pinned node
-      }
-      hiddenNodes.add(curr);
-      if (el && !el.interactive) {
-        (adj.get(curr) || []).forEach(c => {
-          hiddenConnections.add(c.id);
-          if (!visited.has(c.toId)) {
-            visited.add(c.toId);
-            queue.push(c.toId);
-          }
-        });
-      }
     }
 
     const SHAPE_POLYGONS = {
@@ -1238,199 +1207,266 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       return 'none';
     };
 
-    const buildElementHTML = (rawEl: CanvasElement, isChild: boolean = false): string => {
-      const el = compat(rawEl) as any;
-      const elAny = el;
-      const isFillParent = isChild && elAny.fillParent;
-      
-      const isInteractiveHidden = hiddenNodes.has(el.id);
+    const renderVariantHTMLData = (vElements: CanvasElement[], vConnections: Connection[], vBrushStrokes: BrushStroke[]) => {
+      const adj = new Map<string, Connection[]>();
+      vConnections.forEach(c => {
+        if (!adj.has(c.fromId)) adj.set(c.fromId, []);
+        adj.get(c.fromId)!.push(c);
+      });
 
-      let visibilityStyle = 'pointer-events: auto;';
-      if (isInteractiveHidden) visibilityStyle = 'opacity: 0; pointer-events: none;';
-      else if (el.isDisabled) {
-        visibilityStyle = 'filter: grayscale(1) contrast(0.5); opacity: 0.6;';
-        if (el.type !== 'button') visibilityStyle += ' pointer-events: none;';
+      const hiddenNodes = new Set<string>();
+      const hiddenConnections = new Set<string>();
+      const interactiveTargets = new Set<string>();
+      const elementsMap = new Map(vElements.map(e => [e.id, e]));
+
+      // 1. Direct targets of Interactive Btns are hidden
+      vElements.forEach(el => {
+        if (el.interactive) {
+          (adj.get(el.id) || []).forEach(c => {
+            interactiveTargets.add(c.toId);
+            hiddenConnections.add(c.id);
+          });
+        }
+      });
+
+      // 2. BFS to hide downstream nodes unless blocked by another Interactive Btn or Pinned
+      const visited = new Set<string>();
+      interactiveTargets.forEach(id => visited.add(id));
+      const queue = Array.from(interactiveTargets);
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        const el = elementsMap.get(curr);
+        if (el && el.pinned) {
+          continue; // Skip hiding pinned node
+        }
+        hiddenNodes.add(curr);
+        if (el && !el.interactive) {
+          (adj.get(curr) || []).forEach(c => {
+            hiddenConnections.add(c.id);
+            if (!visited.has(c.toId)) {
+              visited.add(c.toId);
+              queue.push(c.toId);
+            }
+          });
+        }
       }
 
-      const innerVisibilityStyle = el.isHidden ? 'opacity: 0; pointer-events: none;' : '';
+      const buildElementHTML = (rawEl: CanvasElement, isChild: boolean = false): string => {
+        const el = compat(rawEl) as any;
+        const elAny = el;
+        const isFillParent = isChild && elAny.fillParent;
+        
+        const isInteractiveHidden = hiddenNodes.has(el.id);
 
-      const shadowStyle = (el.type === 'node' || el.type === 'text' || el.type === 'button') 
-        ? getExportShadowCSS(rawEl.shadow) 
-        : '';
+        let visibilityStyle = 'pointer-events: auto;';
+        if (isInteractiveHidden) visibilityStyle = 'opacity: 0; pointer-events: none;';
+        else if (el.isDisabled) {
+          visibilityStyle = 'filter: grayscale(1) contrast(0.5); opacity: 0.6;';
+          if (el.type !== 'button') visibilityStyle += ' pointer-events: none;';
+        }
 
-      const baseStyle = isFillParent 
-        ? `position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--text-primary); --element-transform: rotate(0deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} transition: opacity 0.4s ease; ${visibilityStyle}`
-        : `position: absolute; left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; color: var(--text-primary); --element-transform: rotate(${el.rotation || 0}deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} transition: opacity 0.4s ease; ${visibilityStyle}`;
-      
-      let expandBtnHTML = '';
-      if (el.enableExpandButton) {
-        const outConnections = connections.filter(c => c.fromId === el.id);
-        if (outConnections.length > 0) {
-          const groups: Record<string, typeof outConnections> = { top: [], right: [], bottom: [], left: [] };
-          outConnections.forEach(c => { const side = c.fromPort || 'bottom'; if (groups[side]) groups[side].push(c); });
-          const arrows: Record<string, string> = { top: '\u25b2', bottom: '\u25bc', left: '\u25c0', right: '\u25b6' };
-          for (const [side, conns] of Object.entries(groups)) {
-            if (conns.length === 0) continue;
-            const targetIdsStr = conns.map(c => c.toId).join(',');
-            const labelTexts = conns.map(c => c.interactiveBtnText || (c.label ? 'YES' : '')).filter(Boolean);
-            const lbl = labelTexts.length > 0 ? escapeHtml(labelTexts.join(' / ')) : arrows[side];
-            const btnClass = 'conn-btn';
-            const btn = '<button class="' + btnClass + '" data-targets="' + targetIdsStr + '" onclick="event.stopPropagation(); toggleMultipleTargets(this, \'' + targetIdsStr + '\', \'' + el.id + '\')">' + lbl + '</button>';
-            expandBtnHTML += '<div class="conn-btn-group ' + side + '">' + btn + '</div>';
+        const innerVisibilityStyle = el.isHidden ? 'opacity: 0; pointer-events: none;' : '';
+
+        const shadowStyle = (el.type === 'node' || el.type === 'text' || el.type === 'button') 
+          ? getExportShadowCSS(rawEl.shadow) 
+          : '';
+
+        const baseStyle = isFillParent 
+          ? `position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--text-primary); --element-transform: rotate(0deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} transition: opacity 0.4s ease; ${visibilityStyle}`
+          : `position: absolute; left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; color: var(--text-primary); --element-transform: rotate(${el.rotation || 0}deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} transition: opacity 0.4s ease; ${visibilityStyle}`;
+        
+        let expandBtnHTML = '';
+        if (el.enableExpandButton) {
+          const outConnections = vConnections.filter(c => c.fromId === el.id);
+          if (outConnections.length > 0) {
+            const groups: Record<string, typeof outConnections> = { top: [], right: [], bottom: [], left: [] };
+            outConnections.forEach(c => { const side = c.fromPort || 'bottom'; if (groups[side]) groups[side].push(c); });
+            const arrows: Record<string, string> = { top: '\u25b2', bottom: '\u25bc', left: '\u25c0', right: '\u25b6' };
+            for (const [side, conns] of Object.entries(groups)) {
+              if (conns.length === 0) continue;
+              const targetIdsStr = conns.map(c => c.toId).join(',');
+              const labelTexts = conns.map(c => c.interactiveBtnText || (c.label ? 'YES' : '')).filter(Boolean);
+              const lbl = labelTexts.length > 0 ? escapeHtml(labelTexts.join(' / ')) : arrows[side];
+              const btnClass = 'conn-btn';
+              const btn = '<button class="' + btnClass + '" data-targets="' + targetIdsStr + '" onclick="event.stopPropagation(); toggleMultipleTargets(this, \'' + targetIdsStr + '\', \'' + el.id + '\')">' + lbl + '</button>';
+              expandBtnHTML += '<div class="conn-btn-group ' + side + '">' + btn + '</div>';
+            }
           }
         }
-      }
-      
-      const wrapperOnClick = el.enableExpandButton 
-        ? `onclick="toggleNodeArrows(event, '${el.id}')"`
-        : '';
+        
+        const wrapperOnClick = el.enableExpandButton 
+          ? `onclick="toggleNodeArrows(event, '${el.id}')"`
+          : '';
 
-      if (el.type === 'node') {
-        const children = elements.filter(child => child.parentId === el.id);
-        const childrenHTML = children.map(child => buildElementHTML(child, true)).join('\n');
-        const safeTitle = escapeHtml(el.title || '');
-        const titleColor = `color: ${getAdaptedTextColor(el.color)};`;
-        return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} is-node ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} overflow: visible; cursor: grab;"><div style="width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} font-family: ${el.fontFamily}; ${getExportStrokeCSS(rawEl.stroke)} display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.3s; ${innerVisibilityStyle}"><div style="padding: 12px 16px; background-color: var(--panel-header-bg); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--border-color); pointer-events: none; ${titleColor}">${safeTitle}</div><div style="position: relative; flex: 1; padding: 16px; overflow: hidden;">${childrenHTML}</div></div>${expandBtnHTML}</div>`;
-      }
-      let innerContent = '';
-      switch (el.type) {
-        case 'text': {
-          const safeText = sanitizeHTML(el.text);
-          innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} display: flex; align-items: center; justify-content: center; padding: ${rawEl.text?.padding?.top ?? 10}px ${rawEl.text?.padding?.right ?? 14}px ${rawEl.text?.padding?.bottom ?? 10}px ${rawEl.text?.padding?.left ?? 14}px; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeText}</div></div>`;
-          break;
+        if (el.type === 'node') {
+          const children = vElements.filter(child => child.parentId === el.id);
+          const childrenHTML = children.map(child => buildElementHTML(child, true)).join('\n');
+          const safeTitle = escapeHtml(el.title || '');
+          const titleColor = `color: ${getAdaptedTextColor(el.color)};`;
+          return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} is-node ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} overflow: visible; cursor: grab;"><div style="width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} font-family: ${el.fontFamily}; ${getExportStrokeCSS(rawEl.stroke)} display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.3s; ${innerVisibilityStyle}"><div style="padding: 12px 16px; background-color: var(--panel-header-bg); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--border-color); pointer-events: none; ${titleColor}">${safeTitle}</div><div style="position: relative; flex: 1; padding: 16px; overflow: hidden;">${childrenHTML}</div></div>${expandBtnHTML}</div>`;
         }
-        case 'button': {
-          const safeButtonText = sanitizeHTML(el.text);
-          let onClickAttr = '';
-          const action = el.actionType;
-          const target = el.actionTarget;
-          
-          const check = "if(window.blockClick){window.blockClick=false;event?.preventDefault();return;}";
-          if (action === 'alert') {
-            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="${check} event.stopPropagation(); showNotification('${safeTarget}')"`;
-          } else if (action === 'link') {
-            const safeLink = escapeHtml(el.link);
-            onClickAttr = `href="${safeLink}" target="_blank" rel="noopener noreferrer" onclick="${check} event.stopPropagation();"`;
-          } else if (action === 'toggleDisabled') {
-            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="${check} event.stopPropagation(); toggleDisabled('${safeTarget}')"`;
-          } else if (action === 'toggleVisibility') {
-            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="${check} event.stopPropagation(); toggleVisibility('${safeTarget}')"`;
-          } else if (action === 'triggerFlow') {
-            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="${check} event.stopPropagation(); triggerFlow('${safeTarget}')"`;
-          } else if (action === 'nextSlide') {
-            onClickAttr = `onclick="${check} event.stopPropagation(); nextSlide()"`;
-          } else if (action === 'prevSlide') {
-            onClickAttr = `onclick="${check} event.stopPropagation(); prevSlide()"`;
-          } else if (action === 'goToSlide') {
-            const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
-            onClickAttr = `onclick="${check} event.stopPropagation(); goToSlideById('${safeTarget}')"`;
+        let innerContent = '';
+        switch (el.type) {
+          case 'text': {
+            const safeText = sanitizeHTML(el.text);
+            innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} display: flex; align-items: center; justify-content: center; padding: ${rawEl.text?.padding?.top ?? 10}px ${rawEl.text?.padding?.right ?? 14}px ${rawEl.text?.padding?.bottom ?? 10}px ${rawEl.text?.padding?.left ?? 14}px; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeText}</div></div>`;
+            break;
           }
-          
-          const tag = action === 'link' ? 'a' : 'button';
-          const buttonDisabledAttr = (action !== 'link' && el.isDisabled) ? 'disabled' : '';
-          innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} color: ${getAdaptedTextColor(el.color)}; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: ${rawEl.text?.fontWeight ?? 700}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; font-size: ${elAny.fontSize || 16}px; padding: 8px 14px; line-height: 1.5; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeButtonText}</div></${tag}>`;
-          break;
-        }
-        case 'image': {
-          const safeImgTitle = elAny.title ? escapeHtml(elAny.title) : '';
-          const safeAlt = escapeHtml(el.alt);
-          const imgHeader = safeImgTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeImgTitle}</div>` : '';
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative; overflow: hidden;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; ${getExportStrokeCSS(rawEl.stroke)} box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
-          break;
-        }
-        case 'video': {
-          const safeVidTitle = elAny.title ? escapeHtml(elAny.title) : '';
-          const safeSrc = escapeHtml(el.src);
-          const vidHeader = safeVidTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeVidTitle}</div>` : '';
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${vidHeader}<div style="flex: 1; position: relative; overflow: hidden;"><iframe id="el-${el.id}" src="${safeSrc}" style="width: 100%; height: 100%; ${getExportStrokeCSS(rawEl.stroke)} box-sizing: border-box;" frameborder="0" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe></div></div>`;
-          break;
-        }
-        case 'icon': {
-          const svgPath = getIconSvgPath(el.iconName || 'home');
-          innerContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" width="100%" height="100%" stroke="${el.color || 'var(--text-primary)'}" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;">${svgPath}</svg></div>`;
-          break;
-        }
-        case 'shape': {
-          const hasText = el.text ? true : false;
-          const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 8px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'};">${sanitizeHTML(el.text)}</div></div>` : '';
-          
-          if (el.shapeType === 'rectangle') {
-            innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} pointer-events: none;">${shapeTextHTML}</div>`;
-          } else if (el.shapeType === 'ellipse') {
-            innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} border-radius: 50%; pointer-events: none;">${shapeTextHTML}</div>`;
-          } else if (el.shapeType === 'line') {
-            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" /></svg>${shapeTextHTML}</div>`;
-          } else if (el.shapeType === 'arrow') {
-            const markerId = `arrowhead-${el.id}`;
-            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><defs><marker id="${markerId}" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" /></marker></defs><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" marker-end="url(#${markerId})" /></svg>${shapeTextHTML}</div>`;
-          } else if (el.shapeType === 'elbow') {
-            const halfW = el.width / 2;
-            const d = `M 0 0 L ${halfW} 0 L ${halfW} ${el.height} L ${el.width} ${el.height}`;
-            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><path d="${d}" fill="none" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" /></svg>${shapeTextHTML}</div>`;
-          } else {
-            const pts = (SHAPE_POLYGONS as any)[el.shapeType] || SHAPE_POLYGONS.triangle;
-            innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><polygon points="${pts}" fill="${el.backgroundColor}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" vector-effect="non-scaling-stroke" /></svg>${shapeTextHTML}</div>`;
+          case 'button': {
+            const safeButtonText = sanitizeHTML(el.text);
+            let onClickAttr = '';
+            const action = el.actionType;
+            const target = el.actionTarget;
+            
+            const check = "if(window.blockClick){window.blockClick=false;event?.preventDefault();return;}";
+            if (action === 'alert') {
+              const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+              onClickAttr = `onclick="${check} event.stopPropagation(); showNotification('${safeTarget}')"`;
+            } else if (action === 'link') {
+              const safeLink = escapeHtml(el.link);
+              onClickAttr = `href="${safeLink}" target="_blank" rel="noopener noreferrer" onclick="${check} event.stopPropagation();"`;
+            } else if (action === 'toggleDisabled') {
+              const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+              onClickAttr = `onclick="${check} event.stopPropagation(); toggleDisabled('${safeTarget}')"`;
+            } else if (action === 'toggleVisibility') {
+              const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+              onClickAttr = `onclick="${check} event.stopPropagation(); toggleVisibility('${safeTarget}')"`;
+            } else if (action === 'triggerFlow') {
+              const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+              onClickAttr = `onclick="${check} event.stopPropagation(); triggerFlow('${safeTarget}')"`;
+            } else if (action === 'nextSlide') {
+              onClickAttr = `onclick="${check} event.stopPropagation(); nextSlide()"`;
+            } else if (action === 'prevSlide') {
+              onClickAttr = `onclick="${check} event.stopPropagation(); prevSlide()"`;
+            } else if (action === 'goToSlide') {
+              const safeTarget = escapeHtml(target).replace(/'/g, "\\'");
+              onClickAttr = `onclick="${check} event.stopPropagation(); goToSlideById('${safeTarget}')"`;
+            }
+            
+            const tag = action === 'link' ? 'a' : 'button';
+            const buttonDisabledAttr = (action !== 'link' && el.isDisabled) ? 'disabled' : '';
+            innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} color: ${getAdaptedTextColor(el.color)}; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: ${rawEl.text?.fontWeight ?? 700}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; font-size: ${elAny.fontSize || 16}px; padding: 8px 14px; line-height: 1.5; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeButtonText}</div></${tag}>`;
+            break;
           }
-          break;
+          case 'image': {
+            const safeImgTitle = elAny.title ? escapeHtml(elAny.title) : '';
+            const safeAlt = escapeHtml(el.alt);
+            const imgHeader = safeImgTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeImgTitle}</div>` : '';
+            innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative; overflow: hidden;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; ${getExportStrokeCSS(rawEl.stroke)} box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
+            break;
+          }
+          case 'video': {
+            const safeVidTitle = elAny.title ? escapeHtml(elAny.title) : '';
+            const safeSrc = escapeHtml(el.src);
+            const vidHeader = safeVidTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeVidTitle}</div>` : '';
+            innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${vidHeader}<div style="flex: 1; position: relative; overflow: hidden;"><iframe id="el-${el.id}" src="${safeSrc}" style="width: 100%; height: 100%; ${getExportStrokeCSS(rawEl.stroke)} box-sizing: border-box;" frameborder="0" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe></div></div>`;
+            break;
+          }
+          case 'icon': {
+            const svgPath = getIconSvgPath(el.iconName || 'home');
+            innerContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" width="100%" height="100%" stroke="${el.color || 'var(--text-primary)'}" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;">${svgPath}</svg></div>`;
+            break;
+          }
+          case 'shape': {
+            const hasText = el.text ? true : false;
+            const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 8px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'};">${sanitizeHTML(el.text)}</div></div>` : '';
+            
+            if (el.shapeType === 'rectangle') {
+              innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} pointer-events: none;">${shapeTextHTML}</div>`;
+            } else if (el.shapeType === 'ellipse') {
+              innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} border-radius: 50%; pointer-events: none;">${shapeTextHTML}</div>`;
+            } else if (el.shapeType === 'line') {
+              innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" /></svg>${shapeTextHTML}</div>`;
+            } else if (el.shapeType === 'arrow') {
+              const markerId = `arrowhead-${el.id}`;
+              innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><defs><marker id="${markerId}" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" /></marker></defs><line x1="0" y1="0" x2="${el.width}" y2="${el.height}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" marker-end="url(#${markerId})" /></svg>${shapeTextHTML}</div>`;
+            } else if (el.shapeType === 'elbow') {
+              const halfW = el.width / 2;
+              const d = `M 0 0 L ${halfW} 0 L ${halfW} ${el.height} L ${el.width} ${el.height}`;
+              innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><path d="${d}" fill="none" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" /></svg>${shapeTextHTML}</div>`;
+            } else {
+              const pts = (SHAPE_POLYGONS as any)[el.shapeType] || SHAPE_POLYGONS.triangle;
+              innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><polygon points="${pts}" fill="${el.backgroundColor}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" vector-effect="non-scaling-stroke" /></svg>${shapeTextHTML}</div>`;
+            }
+            break;
+          }
         }
-      }
-      innerContent = `<div style="width: 100%; height: 100%; transition: opacity 0.3s; ${innerVisibilityStyle}">${innerContent}</div>`;
-      return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} ${el.type === 'button' ? 'is-button' : ''} ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} cursor: grab; overflow: visible;">${innerContent}${expandBtnHTML}</div>`;
+        innerContent = `<div style="width: 100%; height: 100%; transition: opacity 0.3s; ${innerVisibilityStyle}">${innerContent}</div>`;
+        return `<div id="el-wrapper-${el.id}" ${wrapperOnClick} class="${isChild ? '' : 'draggable-element'} ${el.type === 'button' ? 'is-button' : ''} ${el.isDisabled ? 'disabled' : ''} ${isInteractiveHidden ? 'is-hidden' : ''}" data-id="${el.id}" style="${baseStyle} cursor: grab; overflow: visible;">${innerContent}${expandBtnHTML}</div>`;
+      };
+
+      const svgPaths = vConnections.map(conn => {
+        const fromEl = vElements.find(el => el.id === conn.fromId);
+        const toEl = vElements.find(el => el.id === conn.toId);
+        const isHidden = hiddenConnections.has(conn.id) || (fromEl && !fromEl.visible) || (toEl && !toEl.visible);
+        const safeLabel = conn.label ? escapeHtml(conn.label) : '';
+        
+        const connFontFamily = conn.fontFamily ? ` font-family="${conn.fontFamily.replace(/"/g, '&quot;')}"` : '';
+        const connFontSize = conn.fontSize || 14;
+        const connStroke = getConnectionStroke(conn);
+        const connArrow = getConnectionArrow(conn);
+        const connColor = conn.color || 'var(--text-primary)';
+        const connLineColor = connStroke.color;
+        const connStrokeWidth = connStroke.width;
+        const connDasharray = getConnectionDasharray(connStroke.style, connStroke.width);
+        const markerStartId = `arrow-start-${conn.id}`;
+        const markerEndId = `arrow-end-${conn.id}`;
+        const markerStartAttr = connArrow.start !== 'none' ? `marker-start="url(#${markerStartId})"` : '';
+        const markerEndAttr = connArrow.end !== 'none' ? `marker-end="url(#${markerEndId})"` : '';
+        const dashAttr = connDasharray ? `stroke-dasharray="${connDasharray}"` : '';
+        const markerHTML = (type: string, id: string, orient: string) => {
+          if (type === 'circle') {
+            return `<marker id="${id}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><circle cx="5" cy="5" r="3.2" fill="${connLineColor}" /></marker>`;
+          }
+          if (type === 'diamond') {
+            return `<marker id="${id}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><path d="M 5 0.8 L 9.2 5 L 5 9.2 L 0.8 5 Z" fill="${connLineColor}" /></marker>`;
+          }
+          const d = type === 'triangle' ? 'M 1 1 L 9 5 L 1 9 Z' : 'M 0 1.5 L 10 5 L 0 8.5 Z';
+          return `<marker id="${id}" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><path d="${d}" fill="${connLineColor}" /></marker>`;
+        };
+        const defsHTML = `<defs>${connArrow.start !== 'none' ? markerHTML(connArrow.start, markerStartId, 'auto-start-reverse') : ''}${connArrow.end !== 'none' ? markerHTML(connArrow.end, markerEndId, 'auto') : ''}</defs>`;
+
+        const labelHTML = safeLabel ? (
+          conn.labelAlignment === 'follow'
+            ? (conn.reverseLabelDirection
+                ? `<path id="conn-text-${conn.id}" fill="none" stroke="none" pointer-events="none" /><text fill="${connColor}" font-size="${connFontSize}"${connFontFamily} dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-text-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
+                : `<text fill="${connColor}" font-size="${connFontSize}"${connFontFamily} dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
+              )
+            : `<foreignObject id="conn-label-${conn.id}" x="0" y="0" width="400" height="40" pointer-events="none"><div style="display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; pointer-events: none;"><span style="background: var(--bg-canvas); padding: 3px 10px; border-radius: 100px; font-size: ${connFontSize}px; color: ${connColor}; font-weight: bold; white-space: nowrap; border: 1px solid var(--border-color); box-shadow: 0 2px 8px rgba(0,0,0,0.15);${conn.fontFamily ? ` font-family: ${conn.fontFamily};` : ''}">${safeLabel}</span></div></foreignObject>`
+        ) : '';
+        return `<g id="conn-group-${conn.id}" class="connection-group ${isHidden ? 'is-hidden' : ''}" data-id="${conn.id}" data-from="${conn.fromId}" data-to="${conn.toId}" data-label="${escapeHtml(conn.label || '')}" data-align="${conn.labelAlignment || 'horizontal'}" style="cursor: pointer; transition: opacity 0.4s ease; opacity: 0;">${defsHTML}<path id="conn-${conn.id}" fill="none" stroke="${connLineColor}" stroke-width="${connStrokeWidth}" stroke-linecap="round" stroke-linejoin="round" ${dashAttr} data-line-type="${connStroke.lineType}" ${markerStartAttr} ${markerEndAttr} /><path id="conn-pulse-${conn.id}" class="flow-pulse-path" fill="none" stroke="${connLineColor}" stroke-width="${Math.max(2, connStrokeWidth)}" stroke-linecap="round" /><path id="conn-hit-${conn.id}" stroke="transparent" stroke-width="${Math.max(20, connStrokeWidth + 16)}" fill="none" />${labelHTML}</g>`;
+      }).join('\n');
+
+      const brushPaths = vBrushStrokes.map(s => {
+        const isHidden = s.attachedNodeId && (hiddenNodes.has(s.attachedNodeId) || elementsMap.get(s.attachedNodeId)?.visible === false);
+        const styleAttr = isHidden ? 'style="opacity: 0; pointer-events: none; transition: opacity 0.4s ease;"' : 'style="transition: opacity 0.4s ease;"';
+        const ptsAttr = s.points.map(p => `${p.x},${p.y}`).join(' ');
+        return `<path d="${s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}" data-pts="${ptsAttr}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none" ${s.attachedNodeId ? `data-attached-node-id="${s.attachedNodeId}"` : ''} ${styleAttr} />`;
+      }).join('\n');
+
+      const rootElements = vElements.filter(el => !el.parentId).map(el => buildElementHTML(el)).join('\n');
+
+      return { rootElements, svgPaths, brushPaths, hiddenNodes: Array.from(hiddenNodes), hiddenConnections: Array.from(hiddenConnections) };
     };
 
-    const svgPaths = connections.map(conn => {
-      const fromEl = elements.find(el => el.id === conn.fromId);
-      const toEl = elements.find(el => el.id === conn.toId);
-      const isHidden = hiddenConnections.has(conn.id) || (fromEl && !fromEl.visible) || (toEl && !toEl.visible);
-      const safeLabel = conn.label ? escapeHtml(conn.label) : '';
-      
-      const connFontFamily = conn.fontFamily ? ` font-family="${conn.fontFamily.replace(/"/g, '&quot;')}"` : '';
-      const connFontSize = conn.fontSize || 14;
-      const connStroke = getConnectionStroke(conn);
-      const connArrow = getConnectionArrow(conn);
-      const connColor = conn.color || 'var(--text-primary)';
-      const connLineColor = connStroke.color;
-      const connStrokeWidth = connStroke.width;
-      const connDasharray = getConnectionDasharray(connStroke.style, connStroke.width);
-      const markerStartId = `arrow-start-${conn.id}`;
-      const markerEndId = `arrow-end-${conn.id}`;
-      const markerStartAttr = connArrow.start !== 'none' ? `marker-start="url(#${markerStartId})"` : '';
-      const markerEndAttr = connArrow.end !== 'none' ? `marker-end="url(#${markerEndId})"` : '';
-      const dashAttr = connDasharray ? `stroke-dasharray="${connDasharray}"` : '';
-      const markerHTML = (type: string, id: string, orient: string) => {
-        if (type === 'circle') {
-          return `<marker id="${id}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><circle cx="5" cy="5" r="3.2" fill="${connLineColor}" /></marker>`;
-        }
-        if (type === 'diamond') {
-          return `<marker id="${id}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><path d="M 5 0.8 L 9.2 5 L 5 9.2 L 0.8 5 Z" fill="${connLineColor}" /></marker>`;
-        }
-        const d = type === 'triangle' ? 'M 1 1 L 9 5 L 1 9 Z' : 'M 0 1.5 L 10 5 L 0 8.5 Z';
-        return `<marker id="${id}" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="${connArrow.size}" markerHeight="${connArrow.size}" orient="${orient}"><path d="${d}" fill="${connLineColor}" /></marker>`;
+    const renderedVariantsData = allVariants.map(v => {
+      const rendered = renderVariantHTMLData(v.elements, v.connections, v.brushStrokes);
+      return {
+        id: v.id,
+        name: v.name,
+        rootElements: rendered.rootElements,
+        svgPaths: rendered.svgPaths,
+        brushPaths: rendered.brushPaths,
+        elements: v.elements,
+        connections: v.connections,
+        brushStrokes: v.brushStrokes,
+        guides: v.guides,
+        hiddenNodes: rendered.hiddenNodes,
+        hiddenConnections: rendered.hiddenConnections
       };
-      const defsHTML = `<defs>${connArrow.start !== 'none' ? markerHTML(connArrow.start, markerStartId, 'auto-start-reverse') : ''}${connArrow.end !== 'none' ? markerHTML(connArrow.end, markerEndId, 'auto') : ''}</defs>`;
+    });
 
-      const labelHTML = safeLabel ? (
-        conn.labelAlignment === 'follow'
-          ? (conn.reverseLabelDirection
-              ? `<path id="conn-text-${conn.id}" fill="none" stroke="none" pointer-events="none" /><text fill="${connColor}" font-size="${connFontSize}"${connFontFamily} dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-text-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
-              : `<text fill="${connColor}" font-size="${connFontSize}"${connFontFamily} dy="-5" pointer-events="none" font-weight="bold"><textPath href="#conn-${conn.id}" startOffset="50%" text-anchor="middle">${safeLabel}</textPath></text>`
-            )
-          : `<foreignObject id="conn-label-${conn.id}" x="0" y="0" width="400" height="40" pointer-events="none"><div style="display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; pointer-events: none;"><span style="background: var(--bg-canvas); padding: 3px 10px; border-radius: 100px; font-size: ${connFontSize}px; color: ${connColor}; font-weight: bold; white-space: nowrap; border: 1px solid var(--border-color); box-shadow: 0 2px 8px rgba(0,0,0,0.15);${conn.fontFamily ? ` font-family: ${conn.fontFamily};` : ''}">${safeLabel}</span></div></foreignObject>`
-      ) : '';
-      return `<g id="conn-group-${conn.id}" class="connection-group ${isHidden ? 'is-hidden' : ''}" data-id="${conn.id}" data-from="${conn.fromId}" data-to="${conn.toId}" data-label="${escapeHtml(conn.label || '')}" data-align="${conn.labelAlignment || 'horizontal'}" style="cursor: pointer; transition: opacity 0.4s ease; opacity: 0;">${defsHTML}<path id="conn-${conn.id}" fill="none" stroke="${connLineColor}" stroke-width="${connStrokeWidth}" stroke-linecap="round" stroke-linejoin="round" ${dashAttr} data-line-type="${connStroke.lineType}" ${markerStartAttr} ${markerEndAttr} /><path id="conn-pulse-${conn.id}" class="flow-pulse-path" fill="none" stroke="${connLineColor}" stroke-width="${Math.max(2, connStrokeWidth)}" stroke-linecap="round" /><path id="conn-hit-${conn.id}" stroke="transparent" stroke-width="${Math.max(20, connStrokeWidth + 16)}" fill="none" />${labelHTML}</g>`;
-    }).join('\n');
-
-    const brushPaths = brushStrokes.map(s => {
-      const isHidden = s.attachedNodeId && (hiddenNodes.has(s.attachedNodeId) || elementsMap.get(s.attachedNodeId)?.visible === false);
-      const styleAttr = isHidden ? 'style="opacity: 0; pointer-events: none; transition: opacity 0.4s ease;"' : 'style="transition: opacity 0.4s ease;"';
-      const ptsAttr = s.points.map(p => `${p.x},${p.y}`).join(' ');
-      return `<path d="${s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}" data-pts="${ptsAttr}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none" ${s.attachedNodeId ? `data-attached-node-id="${s.attachedNodeId}"` : ''} ${styleAttr} />`;
-    }).join('\n');
-    const rootElements = elements.filter(el => !el.parentId).map(el => buildElementHTML(el)).join('\n');
+    const activeRendered = renderedVariantsData.find(rv => rv.id === activeVariantId) || renderedVariantsData[0];
     const scriptJson = (value: unknown) => JSON.stringify(value)
       .replace(/</g, '\\u003c')
       .replace(/>/g, '\\u003e')
@@ -1493,6 +1529,97 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; transition: background 0.2s; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
         * { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
+        .variant-dropdown-container {
+          position: fixed;
+          top: 20px;
+          left: 20px;
+          z-index: 10000;
+          font-family: inherit;
+          transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        body.presentation-mode .variant-dropdown-container {
+          opacity: 0;
+          pointer-events: none;
+          transform: translateY(-20px);
+        }
+        .variant-dropdown-trigger {
+          background: var(--bg-toolbar);
+          border: 1px solid var(--border-color);
+          color: var(--text-primary);
+          padding: 10px 18px;
+          border-radius: 20px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+        }
+        .variant-dropdown-trigger:hover {
+          background: var(--btn-hover-bg);
+          border-color: var(--text-secondary);
+        }
+        .dropdown-chevron {
+          transition: transform 0.25s ease;
+        }
+        .variant-dropdown-container.open .dropdown-chevron {
+          transform: rotate(180deg);
+        }
+        .variant-dropdown-menu {
+          position: absolute;
+          top: calc(100% + 8px);
+          left: 0;
+          background: var(--bg-toolbar);
+          border: 1px solid var(--border-color);
+          border-radius: 12px;
+          padding: 6px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          min-width: 180px;
+          box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+          opacity: 0;
+          transform: translateY(-10px) scale(0.95);
+          pointer-events: none;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          transform-origin: top left;
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+        }
+        .variant-dropdown-container.open .variant-dropdown-menu {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+          pointer-events: auto;
+        }
+        .variant-menu-item {
+          background: transparent;
+          border: none;
+          color: var(--text-secondary);
+          padding: 8px 14px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          text-align: left;
+          transition: all 0.2s ease;
+          white-space: nowrap;
+        }
+        .variant-menu-item:hover {
+          color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.05);
+        }
+        body.light-theme .variant-menu-item:hover {
+          background: rgba(0, 0, 0, 0.05);
+        }
+        .variant-menu-item.active {
+          background: #3f51b5;
+          color: #ffffff;
+          font-weight: 600;
+        }
         body.presentation-mode #interactive-content { transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1); }
         .draggable-element { transition: transform 0.05s linear; }
         .notification-toast { position: fixed; top: 76px; right: 20px; max-width: min(420px, calc(100vw - 40px)); background: var(--bg-toolbar); color: var(--text-primary); padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateX(120%); opacity: 0; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; pointer-events: none; }
@@ -1685,6 +1812,32 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <svg class="sun-icon" style="display:none;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
         <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
       </button>
+      <!-- Variant Selector -->
+      ${renderedVariantsData.length > 1 ? `
+      <div class="variant-dropdown-container" id="variant-dropdown-container">
+        <button class="variant-dropdown-trigger" onclick="toggleVariantDropdown(event)">
+          <span id="active-variant-name">${escapeHtml(variants.find(v => v.id === activeVariantId)?.name || 'Variant 1')}</span>
+          <svg class="dropdown-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <div class="variant-dropdown-menu" id="variant-dropdown-menu">
+          ${renderedVariantsData.map(rv => `
+            <button class="variant-menu-item ${rv.id === activeVariantId ? 'active' : ''}" data-id="${rv.id}" onclick="switchVariant('${rv.id}'); toggleVariantDropdown(event)">
+              ${escapeHtml(rv.name)}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+      ` : ''}
+
+      <!-- Variant Templates -->
+      ${renderedVariantsData.map(rv => `
+        <template id="template-elements-${rv.id}">${rv.rootElements}</template>
+        <template id="template-connections-${rv.id}">${rv.svgPaths}</template>
+        <template id="template-brush-${rv.id}">${rv.brushPaths}</template>
+      `).join('\n')}
+
       <div id="interactive-container" oncontextmenu="return false;" style="position: relative; width: 100vw; height: 100vh; overflow: hidden; user-select: none; background-color: var(--bg-canvas); background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);">
         <div id="interactive-content" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0;">
           <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible;">
@@ -1693,10 +1846,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#6c6d80" />
               </marker>
             </defs>
-            <g id="connections-layer">${svgPaths}</g>
+            <g id="connections-layer">${activeRendered.svgPaths}</g>
           </svg>
-          <div id="elements-layer">${rootElements}</div>
-           <svg id="canvas-svg-top" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; overflow: visible;"><g id="edit-brush-layer" pointer-events="none">${brushPaths}</g><g id="brush-layer"></g></svg>
+          <div id="elements-layer">${activeRendered.rootElements}</div>
+           <svg id="canvas-svg-top" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; overflow: visible;"><g id="edit-brush-layer" pointer-events="none">${activeRendered.brushPaths}</g><g id="brush-layer"></g></svg>
         </div>
       </div>
       <div class="brush-toolbar">
@@ -1740,6 +1893,20 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       </div>
       <script>
         (function() {
+          window.toggleVariantDropdown = (event) => {
+            if (event) event.stopPropagation();
+            const container = document.getElementById('variant-dropdown-container');
+            if (container) {
+              container.classList.toggle('open');
+            }
+          };
+          document.addEventListener('click', (e) => {
+            const container = document.getElementById('variant-dropdown-container');
+            if (container && !container.contains(e.target)) {
+              container.classList.remove('open');
+            }
+          });
+
           window.toggleTheme = () => {
             const isLight = document.body.classList.toggle('light-theme');
             try {
@@ -1767,10 +1934,14 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           const container = document.getElementById('interactive-container');
           const content = document.getElementById('interactive-content');
           const brushLayer = document.getElementById('brush-layer');
-          let elements = ${scriptJson(elements)};
-          const connections = ${scriptJson(connections)};
-          const originalElements = JSON.parse(JSON.stringify(elements));
-          const originalEditBrushHTML = document.getElementById('edit-brush-layer') ? document.getElementById('edit-brush-layer').innerHTML : '';
+          const variantsData = ${scriptJson(renderedVariantsData.reduce((acc, rv) => { acc[rv.id] = { elements: rv.elements, connections: rv.connections, hiddenNodes: rv.hiddenNodes, hiddenConnections: rv.hiddenConnections }; return acc; }, {} as any))};
+          let activeVariantId = '${activeVariantId}';
+          let elements = ${scriptJson(activeRendered.elements)};
+          let connections = ${scriptJson(activeRendered.connections)};
+          let originalElements = JSON.parse(JSON.stringify(elements));
+          let originalEditBrushHTML = document.getElementById('edit-brush-layer') ? document.getElementById('edit-brush-layer').innerHTML : '';
+          let hiddenNodes = ${scriptJson(activeRendered.hiddenNodes)};
+          let hiddenConnections = ${scriptJson(activeRendered.hiddenConnections)};
           let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step', lastRightClickReset = { id: null, time: 0 };
           let isLaserActive = false, laserPos = { x: -100, y: -100 }, laserTrail = [];
 
@@ -2365,6 +2536,96 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             document.body.classList.remove('presentation-mode');
             
             document.getElementById('zoom-fit').click();
+          };
+
+          window.switchVariant = (variantId) => {
+            if (variantId === activeVariantId) return;
+
+            stopAutoplay();
+
+            document.querySelectorAll('.variant-menu-item').forEach(item => {
+              item.classList.toggle('active', item.getAttribute('data-id') === variantId);
+            });
+            const activeNameSpan = document.getElementById('active-variant-name');
+            if (activeNameSpan) {
+              const activeItem = document.querySelector('.variant-menu-item[data-id="' + variantId + '"]');
+              if (activeItem) {
+                activeNameSpan.innerText = activeItem.innerText.trim();
+              }
+            }
+
+            const elementsLayer = document.getElementById('elements-layer');
+            const connectionsLayer = document.getElementById('connections-layer');
+            const editBrushLayer = document.getElementById('edit-brush-layer');
+            const brushLayer = document.getElementById('brush-layer');
+
+            const newElementsTemplate = document.getElementById('template-elements-' + variantId);
+            const newConnectionsTemplate = document.getElementById('template-connections-' + variantId);
+            const newBrushTemplate = document.getElementById('template-brush-' + variantId);
+
+            if (elementsLayer && newElementsTemplate) {
+              elementsLayer.innerHTML = newElementsTemplate.innerHTML;
+            }
+            if (connectionsLayer && newConnectionsTemplate) {
+              connectionsLayer.innerHTML = newConnectionsTemplate.innerHTML;
+            }
+            if (editBrushLayer && newBrushTemplate) {
+              editBrushLayer.innerHTML = newBrushTemplate.innerHTML;
+            }
+            if (brushLayer) {
+              brushLayer.innerHTML = '';
+            }
+
+            activeVariantId = variantId;
+            const data = variantsData[variantId];
+            if (data) {
+              elements = JSON.parse(JSON.stringify(data.elements));
+              connections = JSON.parse(JSON.stringify(data.connections));
+              originalElements = JSON.parse(JSON.stringify(data.elements));
+              hiddenNodes = data.hiddenNodes;
+              hiddenConnections = data.hiddenConnections;
+              originalEditBrushHTML = editBrushLayer ? editBrushLayer.innerHTML : '';
+            }
+
+            isPresenting = false;
+            document.body.classList.remove('presentation-mode');
+            const presBar = document.getElementById('presentation-bar');
+            if (presBar) presBar.style.display = 'none';
+            playedAnimationIds = [];
+            currentSlideIndex = 0;
+            slides = [];
+            history = [];
+            redoStack = [];
+
+            document.getElementById('present-btn').style.display = 'flex';
+            document.getElementById('theme-toggle-btn').style.display = 'flex';
+            document.getElementById('autoplay-btn').style.display = 'flex';
+            document.getElementById('autoplay-settings-btn').style.display = 'flex';
+            const toolbar = document.querySelector('.brush-toolbar');
+            const showBtn = document.getElementById('brush-show-btn');
+            if (toolbar) {
+              const isHidden = toolbar.classList.contains('hidden-toolbar');
+              toolbar.style.display = isHidden ? 'none' : 'flex';
+              if (showBtn) showBtn.style.display = isHidden ? 'flex' : 'none';
+            }
+            const zoomCtrls = document.querySelector('.zoom-controls');
+            if (zoomCtrls) zoomCtrls.style.display = 'flex';
+
+            updateTransform();
+            updateConnections();
+
+            setTimeout(() => {
+              if (document.getElementById('zoom-fit')) {
+                document.getElementById('zoom-fit').click();
+              }
+            }, 50);
+            setTimeout(() => {
+              resetVisibilities();
+              animateInitialConnections();
+              startPropagationAnimation();
+            }, 500);
+
+            showNotification('Switched variant');
           };
 
           window.goToSlide = (index) => {
@@ -3035,7 +3296,6 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               }
             });
           }
-
           function resetVisibilities() {
             elements.forEach(el => {
               const wrapper = document.getElementById('el-wrapper-' + el.id);
@@ -3043,9 +3303,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 wrapper.classList.remove('flow-reveal', 'flow-hide', 'show-btns');
                 wrapper.style.filter = '';
                 
-                const isInteractiveHidden = ${scriptJson(Array.from(hiddenNodes))}.includes(el.id);
+                const isInteractiveHidden = hiddenNodes.includes(el.id);
                 if (isInteractiveHidden) {
-                  wrapper.classList.add('is-hidden');
+                   wrapper.classList.add('is-hidden');
                   wrapper.style.opacity = '0';
                   wrapper.style.pointerEvents = 'none';
                 } else if (el.isDisabled) {
@@ -3074,14 +3334,14 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             document.querySelectorAll('.connection-group').forEach(cg => {
               cg.classList.remove('flow-active');
               const connId = cg.dataset.id;
-              const isInitialHidden = ${scriptJson(Array.from(hiddenConnections))}.includes(connId);
+              const isInitialHidden = hiddenConnections.includes(connId);
               cg.style.opacity = '0';
               if (isInitialHidden) {
                 cg.classList.add('is-hidden');
               } else {
                 cg.classList.remove('is-hidden');
               }
-            });
+          });
           }
 
           function startPropagationAnimation() {
