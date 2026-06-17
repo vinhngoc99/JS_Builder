@@ -1852,7 +1852,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
            <svg id="canvas-svg-top" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; overflow: visible;"><g id="edit-brush-layer" pointer-events="none">${activeRendered.brushPaths}</g><g id="brush-layer"></g></svg>
         </div>
       </div>
-      <div class="brush-toolbar">
+      <div class="brush-toolbar hidden-toolbar">
         <button id="brush-toggle" class="btn-tool" title="Brush (B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
         <button id="eraser-toggle" class="btn-tool" title="Eraser (E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.9-9.9c1-1 2.5-1 3.4 0l4.3 4.3c1 1 1 2.5 0 3.4L10.5 21c-1 1-2.5 1-3.4 0Z"/><path d="m11 6 4 4"/></svg></button>
         <button id="brush-clear" class="btn-tool" title="Clear (X)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
@@ -1870,8 +1870,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <button id="brush-hide" class="btn-tool" title="Hide Toolbar (H)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
       </div>
-      <button id="brush-show-btn" class="btn-tool" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1001; display: none; background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 50%; width: 42px; height: 42px; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); cursor: pointer; color: var(--text-primary);" title="Show Toolbar (H)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;"><path d="m6 9 6 6 6-6"/></svg>
+      <button id="brush-show-btn" class="btn-tool" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1001; display: flex; background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 50%; width: 32px; height: 32px; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); cursor: pointer; color: var(--text-primary);" title="Show Toolbar (H)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px;"><path d="m6 9 6 6 6-6"/></svg>
       </button>
       <div id="presentation-bar" style="display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 24px; padding: 8px 24px; align-items: center; gap: 20px; z-index: 10000; box-shadow: 0 12px 32px rgba(0,0,0,0.6); color: var(--text-primary);">
         <button class="conn-btn" id="prev-slide-btn" onclick="prevSlide()" tabindex="-1" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">&larr; Prev</button>
@@ -1942,7 +1942,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           let originalEditBrushHTML = document.getElementById('edit-brush-layer') ? document.getElementById('edit-brush-layer').innerHTML : '';
           let hiddenNodes = ${scriptJson(activeRendered.hiddenNodes)};
           let hiddenConnections = ${scriptJson(activeRendered.hiddenConnections)};
-          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step', lastRightClickReset = { id: null, time: 0 };
+          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step', lastRightClickReset = { id: null, time: 0 }, userInteracted = false;
           let isLaserActive = false, laserPos = { x: -100, y: -100 }, laserTrail = [];
 
           const brushCursorEl = document.getElementById('brush-cursor-el');
@@ -2251,6 +2251,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           function startAutoplay() {
             if (isAutoplayActive) return;
 
+            userInteracted = false;
+
             if (autoplayMode === 'instant') {
               playInstant();
               showNotification('Revealing all steps smoothly...');
@@ -2288,6 +2290,26 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               });
           }
 
+          function resetAndRestartAutoplay() {
+            if (userInteracted) return;
+            elements = JSON.parse(JSON.stringify(originalElements));
+            updateAllElements();
+            resetVisibilities();
+            updateConnections();
+            if (document.getElementById('edit-brush-layer')) {
+              document.getElementById('edit-brush-layer').innerHTML = originalEditBrushHTML;
+            }
+            brushLayer.innerHTML = '';
+            setTimeout(() => {
+              if (userInteracted) return;
+              animateInitialConnections();
+              setTimeout(() => {
+                if (userInteracted) return;
+                startAutoplay();
+              }, 500);
+            }, 200);
+          }
+
           async function playInstant() {
             isAutoplayActive = true;
             updateAutoplayUI();
@@ -2306,6 +2328,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               }
             }
             stopAutoplay();
+            if (!userInteracted) {
+              autoplayInterval = setTimeout(resetAndRestartAutoplay, 2000);
+            }
           }
 
           function playNextStep() {
@@ -2324,6 +2349,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               autoplayInterval = setTimeout(playNextStep, delayMs);
             } else {
               stopAutoplay();
+              if (!userInteracted) {
+                autoplayInterval = setTimeout(resetAndRestartAutoplay, 2000);
+              }
             }
           }
 
@@ -2529,7 +2557,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             const toolbar = document.querySelector('.brush-toolbar');
             const showBtn = document.getElementById('brush-show-btn');
             const isHidden = toolbar.classList.contains('hidden-toolbar');
-            toolbar.style.display = isHidden ? 'none' : 'flex';
+            if (toolbar) toolbar.style.display = '';
             if (showBtn) showBtn.style.display = isHidden ? 'flex' : 'none';
             document.querySelector('.zoom-controls').style.display = 'flex';
             
@@ -2605,7 +2633,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             const showBtn = document.getElementById('brush-show-btn');
             if (toolbar) {
               const isHidden = toolbar.classList.contains('hidden-toolbar');
-              toolbar.style.display = isHidden ? 'none' : 'flex';
+              toolbar.style.display = '';
               if (showBtn) showBtn.style.display = isHidden ? 'flex' : 'none';
             }
             const zoomCtrls = document.querySelector('.zoom-controls');
@@ -3382,6 +3410,26 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             animateInitialConnections();
             startPropagationAnimation();
           }, 500);
+
+          function handleUserInteraction(e) {
+            const isElementClick = e.target.closest('.draggable-element') || 
+                                   e.target.closest('.connection-group') || 
+                                   e.target.closest('.conn-btn') ||
+                                   (isBrushMode && !e.target.closest('.brush-toolbar') && !e.target.closest('.theme-toggle-btn') && !e.target.closest('.zoom-controls'));
+            if (isElementClick) {
+              if (!userInteracted) {
+                userInteracted = true;
+                stopAutoplay();
+              }
+            }
+          }
+          window.addEventListener('pointerdown', handleUserInteraction, { capture: true });
+
+          setTimeout(() => {
+            if (!userInteracted) {
+              startAutoplay();
+            }
+          }, 1500);
         })();
       </script>
       <script id="js-builder-state" type="application/json">${scriptJson({
