@@ -283,12 +283,15 @@ export const Canvas: React.FC = () => {
       if (e.ctrlKey && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
       if (e.ctrlKey && e.shiftKey && e.key === 'Z' && !isInput) { e.preventDefault(); redo(); } // some browsers
       if (e.ctrlKey && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
+
+      // Zoom to Fit
+      if (e.ctrlKey && e.key === '0' && !isInput) { e.preventDefault(); zoomToFit(); }
     };
     const handleKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') { setIsSpaceDown(false); setIsPanning(false); } };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool]);
+  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool, zoomToFit]);
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -1017,7 +1020,7 @@ export const Canvas: React.FC = () => {
       {!isPresenting && (
         <div className="zoom-controls">
           <span>{Math.round(scale * 100)}%</span>
-          <button onClick={zoomToFit} className="btn-fit">Fit in view</button>
+          <button onClick={zoomToFit} className="btn-fit" title="Fit in view (Ctrl+0)">Fit</button>
         </div>
       )}
 
@@ -1180,6 +1183,7 @@ export const Canvas: React.FC = () => {
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>X</kbd></span><span className="shortcut-desc">Clear all drawings</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>Space</kbd> + Drag</span><span className="shortcut-desc">Pan canvas</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>Scroll Wheel</kbd></span><span className="shortcut-desc">Zoom in / out</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>0</kbd></span><span className="shortcut-desc">Fit in view</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>H</kbd> / <kbd>?</kbd></span><span className="shortcut-desc">Toggle this Help shortcuts menu</span></div>
                 </div>
               </div>
