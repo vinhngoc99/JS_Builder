@@ -40,6 +40,63 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
   const [isEditingText, setIsEditingText] = useState(false);
   const editableRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
+  const textStyle = rawElement.text && typeof rawElement.text === 'object' ? rawElement.text : null;
+  const textPadding = textStyle?.padding || { top: 10, right: 14, bottom: 10, left: 14 };
+  const verticalAlign = textStyle?.verticalAlign || 'middle';
+  const contentAlignItems = verticalAlign === 'top' ? 'flex-start' : verticalAlign === 'bottom' ? 'flex-end' : 'center';
+
+  const getFillBackground = (fill = rawElement.fill): string => {
+    if (!fill || fill.type === 'none') return 'transparent';
+    if (fill.type === 'gradient' && fill.gradient) {
+      const stops = fill.gradient.stops
+        .map(stop => `${stop.color} ${Math.round(stop.offset * 100)}%`)
+        .join(', ');
+      if (fill.gradient.type === 'radial') return `radial-gradient(circle, ${stops})`;
+      return `linear-gradient(${fill.gradient.angle}deg, ${stops})`;
+    }
+    return fill.color || 'transparent';
+  };
+
+  const fillBackground = getFillBackground();
+  const textFormattingStyle: React.CSSProperties = {
+    color: getAdaptedTextColor(textStyle?.color || element.color),
+    fontSize: `${textStyle?.fontSize || element.fontSize || 16}px`,
+    fontFamily: textStyle?.fontFamily || element.fontFamily,
+    fontWeight: textStyle?.fontWeight || 400,
+    fontStyle: textStyle?.fontStyle || 'normal',
+    textDecoration: textStyle?.textDecoration || 'none',
+    textAlign: textStyle?.align || element.textAlign || 'center',
+    lineHeight: textStyle?.lineHeight || element.lineHeight || 1.5,
+    letterSpacing: `${textStyle?.letterSpacing ?? element.letterSpacing ?? 0}px`,
+  };
+
+  const svgGradientId = `fill-${element.id}`;
+  const renderSvgFillDef = () => {
+    const fill = rawElement.fill;
+    if (!fill || fill.type !== 'gradient' || !fill.gradient) return null;
+    const stops = fill.gradient.stops.map(stop => (
+      <stop key={`${stop.offset}-${stop.color}`} offset={`${Math.round(stop.offset * 100)}%`} stopColor={stop.color} />
+    ));
+    if (fill.gradient.type === 'radial') {
+      return <radialGradient id={svgGradientId}>{stops}</radialGradient>;
+    }
+    const angle = (fill.gradient.angle * Math.PI) / 180;
+    const x = Math.cos(angle);
+    const y = Math.sin(angle);
+    return (
+      <linearGradient
+        id={svgGradientId}
+        x1={`${50 - x * 50}%`}
+        y1={`${50 - y * 50}%`}
+        x2={`${50 + x * 50}%`}
+        y2={`${50 + y * 50}%`}
+      >
+        {stops}
+      </linearGradient>
+    );
+  };
+
+  const svgFill = rawElement.fill?.type === 'gradient' ? `url(#${svgGradientId})` : element.backgroundColor;
 
   const saveSelection = () => {
     const sel = window.getSelection();
@@ -57,6 +114,41 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         sel.addRange(range);
       }
     }
+  };
+
+  const insertPlainTextAtSelection = (text: string) => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const textNode = document.createTextNode(text);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedRangeRef.current = range.cloneRange();
+  };
+
+  const applyRichTextStyle = (styles: Partial<CSSStyleDeclaration>) => {
+    if (editableRef.current) {
+      editableRef.current.focus();
+    }
+    restoreSelection(savedRangeRef.current);
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (range.collapsed) return;
+
+    const wrapper = document.createElement('span');
+    Object.assign(wrapper.style, styles);
+    wrapper.appendChild(range.extractContents());
+    range.insertNode(wrapper);
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(wrapper);
+    selection.removeAllRanges();
+    selection.addRange(nextRange);
+    savedRangeRef.current = nextRange.cloneRange();
   };
 
 
@@ -206,7 +298,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
       >
         <button
           className="rich-text-btn"
-          onClick={() => document.execCommand('bold', false)}
+          onClick={() => applyRichTextStyle({ fontWeight: '700' })}
           title="Bold"
           style={{ fontWeight: 'bold' }}
         >
@@ -214,7 +306,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         </button>
         <button
           className="rich-text-btn"
-          onClick={() => document.execCommand('italic', false)}
+          onClick={() => applyRichTextStyle({ fontStyle: 'italic' })}
           title="Italic"
           style={{ fontStyle: 'italic' }}
         >
@@ -222,7 +314,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         </button>
         <button
           className="rich-text-btn"
-          onClick={() => document.execCommand('underline', false)}
+          onClick={() => applyRichTextStyle({ textDecoration: 'underline' })}
           title="Underline"
           style={{ textDecoration: 'underline' }}
         >
@@ -243,7 +335,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                 editableRef.current.focus();
               }
               restoreSelection(savedRangeRef.current);
-              document.execCommand('foreColor', false, e.target.value);
+              applyRichTextStyle({ color: e.target.value });
             }}
           />
         </div>
@@ -290,6 +382,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
       .map(el => ({ id: el.id, x: el.x, y: el.y }));
 
     startElement.current = { x: element.x, y: element.y, w: element.width, h: element.height };
+    let hasSavedDragHistory = false;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const currentScale = scaleRef.current;
@@ -301,6 +394,10 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
 
       const dx = (moveEvent.clientX - startPos.current.x) / currentScale;
       const dy = (moveEvent.clientY - startPos.current.y) / currentScale;
+      if (!hasSavedDragHistory && (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1)) {
+        saveHistory();
+        hasSavedDragHistory = true;
+      }
 
       let finalDx = dx;
       let finalDy = dy;
@@ -425,8 +522,6 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
       const setSnapGuides = (window as any).setSnapGuides;
       if (setSnapGuides) setSnapGuides({ x: null, y: null });
 
-      saveHistory();
-
       const currentElement = elementRef.current;
       const currentElements = elementsRef.current;
 
@@ -523,6 +618,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
 
     startPos.current = { x: e.clientX, y: e.clientY };
     startElement.current = { x: element.x, y: element.y, w: element.width, h: element.height };
+    let hasSavedResizeHistory = false;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const currentScale = scaleRef.current;
@@ -534,6 +630,10 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
 
       const dx = (moveEvent.clientX - startPos.current.x) / currentScale;
       const dy = (moveEvent.clientY - startPos.current.y) / currentScale;
+      if (!hasSavedResizeHistory && (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1)) {
+        saveHistory();
+        hasSavedResizeHistory = true;
+      }
 
       if (startBox.current) {
         let finalDx = dx;
@@ -697,7 +797,6 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
       const setSnapGuides = (window as any).setSnapGuides;
       if (setSnapGuides) setSnapGuides({ x: null, y: null });
 
-      saveHistory();
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -712,9 +811,14 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
     startRotations.current = elements
       .filter(el => currentSelected.includes(el.id))
       .map(el => ({ id: el.id, rotation: el.rotation || 0 }));
+    let hasSavedRotateHistory = false;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       if (wrapperRef.current) {
+        if (!hasSavedRotateHistory) {
+          saveHistory();
+          hasSavedRotateHistory = true;
+        }
         const rect = wrapperRef.current.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2, centerY = rect.top + rect.height / 2;
         const rad = Math.atan2(moveEvent.clientY - centerY, moveEvent.clientX - centerX);
@@ -735,7 +839,6 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
 
-      saveHistory();
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -788,21 +891,16 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   }
                 }}
                 style={{
-                  color: getAdaptedTextColor(element.color),
-                  fontSize: `${element.fontSize}px`,
-                  fontFamily: element.fontFamily,
+                  ...textFormattingStyle,
                   width: '100%',
-                  textAlign: element.textAlign || 'center',
                   outline: 'none',
                   userSelect: 'text',
                   wordBreak: 'break-word',
-                  lineHeight: element.lineHeight || 1.5,
-                  letterSpacing: `${element.letterSpacing || 0}px`
                 }}
                 onPaste={(e) => {
                   e.preventDefault();
                   const text = e.clipboardData.getData('text/plain');
-                  document.execCommand('insertText', false, text);
+                  insertPlainTextAtSelection(text);
                 }}
                 onKeyUp={() => {
                   savedRangeRef.current = saveSelection();
@@ -818,10 +916,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
           <div 
             onDoubleClick={() => setIsEditingText(true)} 
             style={{ 
-              color: getAdaptedTextColor(element.color), 
-              fontSize: element.fontSize, 
-              fontFamily: element.fontFamily, 
-              backgroundColor: element.backgroundColor, 
+              ...textFormattingStyle,
+              background: fillBackground, 
               borderWidth: `${element.stroke?.width ?? 0}px`,
               borderStyle: element.stroke?.style || 'solid',
               borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'),
@@ -829,13 +925,11 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               width: '100%', 
               height: '100%', 
               display: 'flex', 
-              alignItems: 'center', 
+              alignItems: contentAlignItems, 
               justifyContent: 'center', 
               wordBreak: 'break-word',
               overflow: 'hidden',
-              padding: '10px 14px',
-              lineHeight: element.lineHeight || 1.5,
-              letterSpacing: `${element.letterSpacing || 0}px`,
+              padding: `${textPadding.top}px ${textPadding.right}px ${textPadding.bottom}px ${textPadding.left}px`,
               boxSizing: 'border-box'
             }}
           >
@@ -843,10 +937,10 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               className="text-element-content"
               style={{
                 width: '100%',
-                textAlign: element.textAlign || 'center',
+                textAlign: textFormattingStyle.textAlign,
                 wordBreak: 'break-word',
-                lineHeight: element.lineHeight || 1.5,
-                letterSpacing: `${element.letterSpacing || 0}px`
+                lineHeight: textFormattingStyle.lineHeight,
+                letterSpacing: textFormattingStyle.letterSpacing
               }}
               dangerouslySetInnerHTML={{ __html: element.text }}
             />
@@ -888,22 +982,16 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   }
                 }}
                 style={{
-                  color: getAdaptedTextColor(element.color),
-                  fontSize: `${elAny.fontSize || 16}px`,
-                  fontFamily: element.fontFamily,
+                  ...textFormattingStyle,
                   width: '100%',
-                  textAlign: element.textAlign || 'center',
                   outline: 'none',
-                  fontWeight: 'bold',
                   userSelect: 'text',
                   wordBreak: 'break-word',
-                  lineHeight: element.lineHeight || 1.5,
-                  letterSpacing: `${element.letterSpacing || 0}px`
                 }}
                 onPaste={(e) => {
                   e.preventDefault();
                   const text = e.clipboardData.getData('text/plain');
-                  document.execCommand('insertText', false, text);
+                  insertPlainTextAtSelection(text);
                 }}
                 onKeyUp={() => {
                   savedRangeRef.current = saveSelection();
@@ -973,22 +1061,17 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
             }}
             disabled={element.isDisabled}
             style={{ 
-              backgroundColor: element.backgroundColor, 
-              color: getAdaptedTextColor(element.color), 
-              fontFamily: element.fontFamily, 
-              fontSize: `${elAny.fontSize || 16}px`, 
+              ...textFormattingStyle,
+              background: fillBackground, 
               width: '100%', 
               height: '100%', 
               display: 'flex', 
-              alignItems: 'center', 
+              alignItems: contentAlignItems, 
               justifyContent: 'center', 
-              fontWeight: 'bold',
               cursor: isPresenting ? 'pointer' : 'default',
               pointerEvents: 'auto',
               transition: 'opacity 0.2s, transform 0.1s',
-              padding: '8px 14px',
-              lineHeight: element.lineHeight || 1.5,
-              letterSpacing: `${element.letterSpacing || 0}px`,
+              padding: `${textPadding.top}px ${textPadding.right}px ${textPadding.bottom}px ${textPadding.left}px`,
               boxSizing: 'border-box',
               borderWidth: `${element.stroke?.width ?? 0}px`,
               borderStyle: element.stroke?.style || 'solid',
@@ -999,10 +1082,10 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
             <div
               style={{
                 width: '100%',
-                textAlign: element.textAlign || 'center',
+                textAlign: textFormattingStyle.textAlign,
                 wordBreak: 'break-word',
-                lineHeight: element.lineHeight || 1.5,
-                letterSpacing: `${element.letterSpacing || 0}px`
+                lineHeight: textFormattingStyle.lineHeight,
+                letterSpacing: textFormattingStyle.letterSpacing
               }}
               dangerouslySetInnerHTML={{ __html: element.text }}
             />
@@ -1077,21 +1160,16 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   }
                 }}
                 style={{
-                  color: getAdaptedTextColor(elAny.color),
-                  fontSize: `${elAny.fontSize || 14}px`,
-                  fontFamily: elAny.fontFamily || 'sans-serif',
+                  ...textFormattingStyle,
                   width: '100%',
-                  textAlign: elAny.textAlign || 'center',
                   outline: 'none',
                   userSelect: 'text',
                   wordBreak: 'break-word',
-                  lineHeight: element.lineHeight || 1.5,
-                  letterSpacing: `${element.letterSpacing || 0}px`
                 }}
                 onPaste={(e) => {
                   e.preventDefault();
                   const text = e.clipboardData.getData('text/plain');
-                  document.execCommand('insertText', false, text);
+                  insertPlainTextAtSelection(text);
                 }}
                 onKeyUp={() => {
                   savedRangeRef.current = saveSelection();
@@ -1123,13 +1201,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               <div
                 style={{
                   width: '100%',
-                  color: getAdaptedTextColor(elAny.color), 
-                  fontSize: `${elAny.fontSize || 14}px`, 
-                  fontFamily: elAny.fontFamily || 'sans-serif', 
-                  textAlign: elAny.textAlign || 'center',
+                  ...textFormattingStyle,
                   wordBreak: 'break-word',
-                  lineHeight: element.lineHeight || 1.5,
-                  letterSpacing: `${element.letterSpacing || 0}px`
                 }}
                 dangerouslySetInnerHTML={{ __html: shapeText }}
               />
@@ -1205,7 +1278,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         if (element.shapeType === 'rectangle') {
           return (
             <div 
-              style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: element.backgroundColor, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: `${element.stroke?.radius ?? 0}px` }}
+              style={{ position: 'relative', width: '100%', height: '100%', background: fillBackground, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: `${element.stroke?.radius ?? 0}px` }}
               onDoubleClick={() => setIsEditingText(true)}
             >
               {shapeTextOverlay}
@@ -1215,7 +1288,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         if (element.shapeType === 'ellipse') {
           return (
             <div 
-              style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: element.backgroundColor, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: '50%' }}
+              style={{ position: 'relative', width: '100%', height: '100%', background: fillBackground, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: '50%' }}
               onDoubleClick={() => setIsEditingText(true)}
             >
               {shapeTextOverlay}
@@ -1245,7 +1318,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
             onDoubleClick={() => setIsEditingText(true)}
           >
             <svg width="100%" height="100%" preserveAspectRatio="none" style={{ overflow: 'visible', filter: element.shadow?.enabled ? `drop-shadow(${element.shadow.offsetX}px ${element.shadow.offsetY}px ${element.shadow.blur}px ${element.shadow.color})` : undefined }}>
-              <polygon points={shapePts} fill={element.backgroundColor} stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} strokeDasharray={element.stroke?.style === 'dashed' ? '8 4' : element.stroke?.style === 'dotted' ? '2 2' : undefined} vectorEffect="non-scaling-stroke" />
+              <defs>{renderSvgFillDef()}</defs>
+              <polygon points={shapePts} fill={svgFill} stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} strokeDasharray={element.stroke?.style === 'dashed' ? '8 4' : element.stroke?.style === 'dotted' ? '2 2' : undefined} vectorEffect="non-scaling-stroke" />
             </svg>
             {shapeTextOverlay}
           </div>
@@ -1259,7 +1333,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               viewBox="0 0 24 24" 
               width="100%" 
               height="100%" 
-              stroke={element.color || 'currentColor'} 
+              stroke={element.iconColor || element.color || 'currentColor'} 
               fill="none" 
               strokeWidth="2" 
               strokeLinecap="round" 
@@ -1292,7 +1366,9 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         width: isFillParent ? '100%' : element.width, 
         height: isFillParent ? '100%' : element.height, 
         transform: isFillParent ? 'none' : `rotate(${element.rotation || 0}deg)`, 
-        backgroundColor: element.type === 'node' ? getAdaptedBgColor('node', element.backgroundColor) : undefined, 
+        background: element.type === 'node' ? getFillBackground(rawElement.fill) || getAdaptedBgColor('node', element.backgroundColor) : undefined, 
+        zIndex: element.zIndex ?? (element.type === 'node' ? 20 : 21),
+        opacity: element.isHidden || element.isDisabled ? undefined : (element.opacity ?? 1),
         pointerEvents: isBrushMode ? 'none' : 'auto',
         borderWidth: element.type === 'node' ? `${element.stroke?.width ?? 1}px` : undefined,
         borderStyle: element.type === 'node' ? (element.stroke?.style || 'solid') : undefined,

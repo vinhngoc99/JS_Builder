@@ -5,6 +5,7 @@ import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { LayerPanel } from './components/LayerPanel';
+import { SlideNavigator } from './components/SlideNavigator';
 import './App.css';
 
 function AppContent() {
@@ -14,6 +15,7 @@ function AppContent() {
       {!isPresenting && <TopHeader />}
       <div className="editor-workspace">
         {!isPresenting && <Toolbar />}
+        {!isPresenting && <SlideNavigator />}
         {!isPresenting && <LayerPanel />}
         <Canvas />
         {!isPresenting && <PropertiesPanel />}

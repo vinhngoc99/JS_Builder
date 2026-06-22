@@ -133,6 +133,7 @@ export interface BaseElement {
   pinned: boolean;
   disabled: boolean;
   isSlide: boolean;
+  speakerNotes?: string;
   fillParent: boolean;
 
   // ── Animations ──

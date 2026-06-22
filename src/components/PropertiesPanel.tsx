@@ -58,8 +58,36 @@ const Accordion = ({ title, children, defaultOpen = true }: { title: string; chi
   );
 };
 
+const compressImageFile = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error('Could not read image file.'));
+  reader.onload = () => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('Could not decode image file.'));
+    img.onload = () => {
+      const maxSide = 1600;
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const width = Math.max(1, Math.round(img.width * scale));
+      const height = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas is not available.'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      const mime = file.type === 'image/png' && file.size < 500_000 ? 'image/png' : 'image/jpeg';
+      resolve(canvas.toDataURL(mime, mime === 'image/jpeg' ? 0.82 : undefined));
+    };
+    img.src = String(reader.result || '');
+  };
+  reader.readAsDataURL(file);
+});
+
 export const PropertiesPanel: React.FC = () => {
-  const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory } = useBuilder();
+  const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory, saveHistoryOnce, showAlert } = useBuilder();
 
   const lastSelectedId = selectedIds[selectedIds.length - 1];
   const selectedElement = elements.find(el => el.id === lastSelectedId);
@@ -90,7 +118,14 @@ export const PropertiesPanel: React.FC = () => {
     setPreviewMode(true);
     setModalOpen(true);
   };
-  const handleCopy = () => { navigator.clipboard.writeText(htmlCode); };
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(htmlCode);
+    } catch (error) {
+      console.error('Failed to copy HTML', error);
+      await showAlert('Clipboard permission was denied. Please copy the code manually.', 'Copy failed');
+    }
+  };
 
   // --- Export Modal ---
   const renderExportModal = () => {
@@ -199,19 +234,23 @@ export const PropertiesPanel: React.FC = () => {
     if (!sc) return null;
     const connStroke = getConnectionStroke(sc);
     const connArrow = getConnectionArrow(sc);
+    const updateConnectionOnce = (updates: Partial<Connection>) => {
+      saveHistoryOnce(`connection-panel:${sc.id}`);
+      updateConnection(sc.id, updates);
+    };
     const updateConnectionStroke = (updates: Partial<typeof connStroke>) => {
-      updateConnection(sc.id, { stroke: { ...connStroke, ...updates } });
+      updateConnectionOnce({ stroke: { ...connStroke, ...updates } });
     };
     const updateConnectionArrow = (updates: Partial<typeof connArrow>) => {
       const nextArrow = { ...connArrow, ...updates };
-      updateConnection(sc.id, {
+      updateConnectionOnce({
         arrow: nextArrow,
         startArrow: nextArrow.start === 'arrow' ? 'arrow' : 'none',
         endArrow: nextArrow.end === 'arrow' ? 'arrow' : 'none',
       });
     };
     return (
-      <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`} onFocus={saveHistory}>
+      <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Connection</div>
           <button onClick={handleClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} title="Hide Panel"><X size={16} /></button>
@@ -235,7 +274,7 @@ export const PropertiesPanel: React.FC = () => {
             } else {
               updates.interactiveBtnText = undefined;
             }
-            updateConnection(sc.id, updates);
+            updateConnectionOnce(updates);
           }} 
           placeholder="Label..." 
         />
@@ -246,7 +285,7 @@ export const PropertiesPanel: React.FC = () => {
             <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
               <button
                 className="btn"
-                onClick={() => updateConnection(sc.id, { interactiveBtnText: 'YES' })}
+                onClick={() => updateConnectionOnce({ interactiveBtnText: 'YES' })}
                 style={{
                   flex: 1,
                   padding: '6px',
@@ -264,7 +303,7 @@ export const PropertiesPanel: React.FC = () => {
               </button>
               <button
                 className="btn"
-                onClick={() => updateConnection(sc.id, { interactiveBtnText: 'NO' })}
+                onClick={() => updateConnectionOnce({ interactiveBtnText: 'NO' })}
                 style={{
                   flex: 1,
                   padding: '6px',
@@ -284,7 +323,7 @@ export const PropertiesPanel: React.FC = () => {
           </>
         )}
         <Label>Alignment</Label>
-        <select value={sc.labelAlignment || 'horizontal'} onChange={(e) => updateConnection(sc.id, { labelAlignment: e.target.value as any })}>
+        <select value={sc.labelAlignment || 'horizontal'} onChange={(e) => updateConnectionOnce({ labelAlignment: e.target.value as any })}>
           <option value="horizontal">Horizontal</option><option value="follow">Follow Curve</option>
         </select>
         
@@ -293,18 +332,18 @@ export const PropertiesPanel: React.FC = () => {
             <Toggle 
               label="Reverse Text Direction" 
               checked={!!sc.reverseLabelDirection} 
-              onChange={(v) => updateConnection(sc.id, { reverseLabelDirection: v })} 
+              onChange={(v) => updateConnectionOnce({ reverseLabelDirection: v })} 
               color="#4caf50" 
             />
           </div>
         )}
         
         <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
-          <div style={{ flex: 2 }}><Label>Font</Label><select value={sc.fontFamily || 'sans-serif'} onChange={(e) => updateConnection(sc.id, { fontFamily: e.target.value })}>{fontOptions}</select></div>
-          <div style={{ flex: 1 }}><Label>Label Size</Label><input type="number" value={sc.fontSize || 14} onChange={(e) => updateConnection(sc.id, { fontSize: parseInt(e.target.value) || 14 })} /></div>
+          <div style={{ flex: 2 }}><Label>Font</Label><select value={sc.fontFamily || 'sans-serif'} onChange={(e) => updateConnectionOnce({ fontFamily: e.target.value })}>{fontOptions}</select></div>
+          <div style={{ flex: 1 }}><Label>Label Size</Label><input type="number" value={sc.fontSize || 14} onChange={(e) => updateConnectionOnce({ fontSize: parseInt(e.target.value) || 14 })} /></div>
         </div>
         <div style={{ marginTop: '6px' }}>
-          <CustomColorPicker label="Text Color" name="color" value={sc.color || '#e0e0e0'} onChange={(e) => updateConnection(sc.id, { color: e.target.value })} onTransparent={() => updateConnection(sc.id, { color: 'transparent' })} />
+          <CustomColorPicker label="Text Color" name="color" value={sc.color || '#e0e0e0'} onChange={(e) => updateConnectionOnce({ color: e.target.value })} onTransparent={() => updateConnectionOnce({ color: 'transparent' })} />
         </div>
 
         <Divider />
@@ -324,8 +363,8 @@ export const PropertiesPanel: React.FC = () => {
         </div>
 
         <div style={{ display: 'none', gap: '6px', marginTop: '6px' }}>
-          <div style={{ flex: 1 }}><Label>Start</Label><select value={sc.startArrow || 'none'} onChange={(e) => updateConnection(sc.id, { startArrow: e.target.value as any })}><option value="none">—</option><option value="arrow">Arrow</option></select></div>
-          <div style={{ flex: 1 }}><Label>End</Label><select value={sc.endArrow || 'none'} onChange={(e) => updateConnection(sc.id, { endArrow: e.target.value as any })}><option value="none">—</option><option value="arrow">Arrow</option></select></div>
+          <div style={{ flex: 1 }}><Label>Start</Label><select value={sc.startArrow || 'none'} onChange={(e) => updateConnectionOnce({ startArrow: e.target.value as any })}><option value="none">—</option><option value="arrow">Arrow</option></select></div>
+          <div style={{ flex: 1 }}><Label>End</Label><select value={sc.endArrow || 'none'} onChange={(e) => updateConnectionOnce({ endArrow: e.target.value as any })}><option value="none">—</option><option value="arrow">Arrow</option></select></div>
         </div>
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <button onClick={() => removeConnection(sc.id)} style={{ width: '100%', padding: '8px', background: 'none', border: '1px solid #ef5350', color: '#ef5350', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}>Delete</button>
@@ -341,6 +380,7 @@ export const PropertiesPanel: React.FC = () => {
     const { name, value, type } = e.target;
     let parsedValue: string | number = value;
     if (type === 'number') parsedValue = parseFloat(value);
+    saveHistoryOnce(`bulk-panel:${selectedIds.join(',')}`);
     
     selectedIds.forEach(id => {
       const targetEl = elements.find(el => el.id === id);
@@ -395,7 +435,7 @@ export const PropertiesPanel: React.FC = () => {
   };
 
   const handlePanelChange = (updates: any) => {
-    saveHistory();
+    saveHistoryOnce(`element-panel:${selectedIds.join(',')}`);
     selectedIds.forEach(id => {
       updateElement(id, updates);
     });
@@ -578,7 +618,7 @@ export const PropertiesPanel: React.FC = () => {
   }
 
   return (
-    <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`} onFocus={saveHistory}>
+    <div className={`properties-panel ${!isBlurEnabled ? 'no-blur' : ''}`}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
@@ -633,7 +673,7 @@ export const PropertiesPanel: React.FC = () => {
 
         {/* Arrange & Ordering */}
         <Accordion title="Arrange & Layers" defaultOpen={false}>
-          <ArrangePanel elementIds={[selectedElement!.id]} />
+          <ArrangePanel elementIds={selectedIds} />
         </Accordion>
 
         {/* Animations */}
@@ -694,6 +734,29 @@ export const PropertiesPanel: React.FC = () => {
             )}
           </div>
         </Accordion>
+
+        {selectedElement!.type === 'node' && (
+          <Accordion title="Speaker Notes" defaultOpen={false}>
+            <textarea
+              value={(selectedElement! as any).speakerNotes || ''}
+              onChange={(e) => handlePanelChange({ speakerNotes: e.target.value } as any)}
+              placeholder="Notes for this presentation node..."
+              style={{
+                width: '100%',
+                minHeight: '96px',
+                resize: 'vertical',
+                padding: '8px',
+                background: 'var(--input-bg)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                fontSize: '12px',
+                lineHeight: 1.4,
+                boxSizing: 'border-box',
+              }}
+            />
+          </Accordion>
+        )}
 
         {/* Button Actions */}
         {selectedElement!.type === 'button' && (
@@ -827,6 +890,31 @@ export const PropertiesPanel: React.FC = () => {
               />
               {selectedElement!.type === 'image' && (
                 <>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        if (file.size > 12 * 1024 * 1024) {
+                          await showAlert('Image is too large. Please choose an image under 12MB.', 'Upload image');
+                          return;
+                        }
+                        const src = await compressImageFile(file);
+                        handlePanelChange({
+                          src,
+                          alt: file.name,
+                        } as any);
+                      } catch (error) {
+                        console.error('Failed to upload image', error);
+                        await showAlert('Could not process this image. Please try another file.', 'Upload image');
+                      } finally {
+                        e.target.value = '';
+                      }
+                    }}
+                    style={{ width: '100%', fontSize: '11px' }}
+                  />
                   <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, marginTop: '4px' }}>Alt Text</div>
                   <input type="text" value={el.alt || ''} onChange={(e) => handlePanelChange({ alt: e.target.value })} style={{ width: '100%' }} />
                   <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, marginTop: '4px' }}>Object Fit</div>

@@ -14,7 +14,7 @@ export const LayerPanel: React.FC = () => {
     reorderElements,
   } = useBuilder();
 
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
   const draggedIdRef = React.useRef<string | null>(null);
@@ -99,7 +99,7 @@ export const LayerPanel: React.FC = () => {
       style={{
         position: 'absolute',
         left: '70px', // Right next to the Left Toolbar
-        top: '70px',
+        top: '402px',
         bottom: '20px',
         width: '240px',
         backgroundColor: 'var(--bg-panel)',

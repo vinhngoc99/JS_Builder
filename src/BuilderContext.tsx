@@ -150,6 +150,8 @@ interface HistoryState {
   brushStrokes: BrushStroke[];
 }
 
+export type SlideLayout = 'blank' | 'title' | 'titleBody' | 'section' | 'media';
+
 interface BuilderContextType {
   elements: CanvasElement[];
   connections: Connection[];
@@ -179,6 +181,9 @@ interface BuilderContextType {
   setIsBlurEnabled: (enabled: boolean) => void;
   
   addElement: (type: ElementType, pos?: { x: number, y: number }, additionalProps?: Partial<CanvasElement>) => void;
+  addSlideNode: (layout?: SlideLayout) => void;
+  duplicateSlideNode: (id: string) => void;
+  moveSlideNode: (id: string, direction: 'left' | 'right') => void;
   updateElement: (id: string, updates: Partial<CanvasElement> & Record<string, any>) => void;
   updateConnection: (id: string, updates: Partial<Connection>) => void;
   removeElement: (id: string) => void;
@@ -210,6 +215,7 @@ interface BuilderContextType {
   undo: () => void;
   redo: () => void;
   saveHistory: () => void;
+  saveHistoryOnce: (scope: string, idleMs?: number) => void;
   brushTool: 'draw' | 'erase';
   setBrushTool: (tool: 'draw' | 'erase') => void;
   eraseBrushStrokesAt: (currentPos: { x: number; y: number }, lastPos: { x: number; y: number } | null, radius: number) => void;
@@ -411,6 +417,25 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
     setHistory(prev => [...prev.slice(-49), snapshot]);
     setRedoStack([]);
+  }, []);
+
+  const historyScopesRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const saveHistoryOnce = useCallback((scope: string, idleMs = 700) => {
+    if (!historyScopesRef.current[scope]) {
+      saveHistory();
+    }
+
+    window.clearTimeout(historyScopesRef.current[scope]);
+    historyScopesRef.current[scope] = window.setTimeout(() => {
+      delete historyScopesRef.current[scope];
+    }, idleMs);
+  }, [saveHistory]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(historyScopesRef.current).forEach(timer => window.clearTimeout(timer));
+    };
   }, []);
 
   const revealDownstream = useCallback((startId: string) => {
@@ -795,6 +820,167 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     setElements([...elements, newElement]); setSelectedIds([id]); setSelectedConnectionId(null);
   };
+
+  const addSlideNode = (layout: SlideLayout = 'blank') => {
+    saveHistory();
+    const slideId = uuidv4();
+    const slides = elementsRef.current
+      .filter(el => el.type === 'node' && el.isSlide !== false)
+      .sort((a, b) => a.x - b.x);
+    const lastSlide = slides[slides.length - 1];
+    const x = lastSlide ? lastSlide.x + lastSlide.width + 90 : 120;
+    const y = lastSlide ? lastSlide.y : 120;
+    const maxZ = Math.max(0, ...elementsRef.current.map(el => el.zIndex || 0));
+    const slide = createElement('node', {
+      id: slideId,
+      name: `Slide ${slides.length + 1}`,
+      x,
+      y,
+      width: 640,
+      height: 360,
+      zIndex: maxZ + 1,
+      isSlide: true,
+      fill: { type: 'solid', color: 'var(--bg-node)' },
+      stroke: { width: 1, color: 'var(--border-color)', style: 'solid', radius: 10, cap: 'round', join: 'round' },
+    } as any);
+
+    const makeText = (
+      content: string,
+      left: number,
+      top: number,
+      width: number,
+      height: number,
+      fontSize: number,
+      fontWeight: number,
+      align: 'left' | 'center' = 'center'
+    ) => createElement('text', {
+      id: uuidv4(),
+      parentId: slideId,
+      name: content,
+      x: left,
+      y: top,
+      width,
+      height,
+      zIndex: maxZ + 2,
+      fill: { type: 'none', color: 'transparent' },
+      stroke: { width: 0, color: 'transparent', style: 'solid', radius: 0, cap: 'round', join: 'round' },
+      text: {
+        content,
+        fontFamily: "'Google Sans Text'",
+        fontSize,
+        fontWeight,
+        fontStyle: 'normal',
+        textDecoration: 'none',
+        color: 'var(--text-primary)',
+        align,
+        verticalAlign: 'middle',
+        lineHeight: 1.25,
+        letterSpacing: 0,
+        padding: { top: 8, right: 8, bottom: 8, left: 8 },
+      },
+    } as any);
+
+    const children: CanvasElement[] = [];
+    if (layout === 'title') {
+      children.push(makeText('Presentation title', 54, 92, 500, 70, 36, 700));
+      children.push(makeText('Subtitle', 92, 170, 424, 44, 18, 400));
+    } else if (layout === 'titleBody') {
+      children.push(makeText('Slide title', 38, 28, 540, 54, 30, 700, 'left'));
+      children.push(makeText('Add supporting points here', 54, 112, 500, 120, 18, 400, 'left'));
+    } else if (layout === 'section') {
+      children.push(makeText('Section headline', 54, 106, 500, 62, 34, 700));
+      children.push(makeText('Short context', 110, 176, 390, 40, 16, 400));
+    } else if (layout === 'media') {
+      children.push(makeText('Slide title', 38, 24, 540, 48, 28, 700, 'left'));
+      children.push(createElement('image', {
+        id: uuidv4(),
+        parentId: slideId,
+        name: 'Image placeholder',
+        x: 40,
+        y: 92,
+        width: 260,
+        height: 170,
+        zIndex: maxZ + 2,
+        objectFit: 'cover',
+      } as any));
+      children.push(makeText('Add notes beside the image', 326, 116, 230, 110, 18, 400, 'left'));
+    }
+
+    setElements(prev => [...prev, slide, ...children]);
+    setSelectedIds([slideId]);
+    setSelectedConnectionId(null);
+    setIsPropertiesOpen(true);
+  };
+
+  const duplicateSlideNode = (id: string) => {
+    const source = elementsRef.current.find(el => el.id === id && el.type === 'node');
+    if (!source) return;
+    saveHistory();
+    const idMap = new Map<string, string>();
+    const collectDescendants = (parentId: string): CanvasElement[] => {
+      const children = elementsRef.current.filter(el => el.parentId === parentId);
+      return children.flatMap(child => [child, ...collectDescendants(child.id)]);
+    };
+    const descendants = collectDescendants(id);
+    [source, ...descendants].forEach(el => idMap.set(el.id, uuidv4()));
+    const offsetX = source.width + 90;
+    const clones = [source, ...descendants].map(el => ({
+      ...structuredClone(el),
+      id: idMap.get(el.id)!,
+      name: el.id === source.id ? `${el.name || 'Slide'} Copy` : el.name,
+      parentId: el.parentId && idMap.has(el.parentId) ? idMap.get(el.parentId)! : el.parentId,
+      x: el.parentId ? el.x : el.x + offsetX,
+      y: el.y,
+      animations: (el.animations || []).map(anim => ({ ...anim, id: uuidv4() })),
+      actionTarget: idMap.get((el as any).actionTarget) || (el as any).actionTarget,
+      action: (el as ButtonElement).action
+        ? {
+            ...(el as ButtonElement).action,
+            target: idMap.get((el as ButtonElement).action.target) || (el as ButtonElement).action.target,
+          }
+        : (el as ButtonElement).action,
+    })) as CanvasElement[];
+    const clonedConnections = connectionsRef.current
+      .filter(conn => idMap.has(conn.fromId) && idMap.has(conn.toId))
+      .map(conn => ({
+        ...structuredClone(conn),
+        id: uuidv4(),
+        fromId: idMap.get(conn.fromId)!,
+        toId: idMap.get(conn.toId)!,
+      }));
+    const clonedBrushStrokes = brushStrokesRef.current
+      .filter(stroke => stroke.attachedNodeId && idMap.has(stroke.attachedNodeId))
+      .map(stroke => ({
+        ...structuredClone(stroke),
+        id: uuidv4(),
+        attachedNodeId: stroke.attachedNodeId ? idMap.get(stroke.attachedNodeId) || stroke.attachedNodeId : stroke.attachedNodeId,
+        points: stroke.points.map(point => ({ x: point.x + offsetX, y: point.y })),
+      }));
+    setElements(prev => [...prev, ...clones]);
+    setConnections(prev => [...prev, ...clonedConnections]);
+    setBrushStrokes(prev => [...prev, ...clonedBrushStrokes]);
+    setSelectedIds([idMap.get(id)!]);
+    setSelectedConnectionId(null);
+  };
+
+  const moveSlideNode = (id: string, direction: 'left' | 'right') => {
+    const slides = elementsRef.current
+      .filter(el => el.type === 'node' && el.isSlide !== false)
+      .sort((a, b) => a.x - b.x);
+    const index = slides.findIndex(slide => slide.id === id);
+    const targetIndex = direction === 'left' ? index - 1 : index + 1;
+    if (index < 0 || targetIndex < 0 || targetIndex >= slides.length) return;
+    saveHistory();
+    const current = slides[index];
+    const target = slides[targetIndex];
+    setElements(prev => prev.map(el => {
+      if (el.id === current.id) return { ...el, x: target.x, y: target.y } as CanvasElement;
+      if (el.id === target.id) return { ...el, x: current.x, y: current.y } as CanvasElement;
+      return el;
+    }));
+    setCurrentSlideIndex(targetIndex);
+  };
+
   const updateElement = (id: string, updates: Partial<CanvasElement> & Record<string, any>) => {
     setElements(prev => prev.map(el => {
       if (el.id !== id) return el;
@@ -985,9 +1171,23 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const selectElement = (id: string | null, isMulti: boolean = false) => {
     if (!id) { setSelectedIds([]); return; }
     if (isMulti) {
-      setSelectedIds(prev => prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]);
+      const target = elementsRef.current.find(el => el.id === id);
+      const groupIds = target?.groupId
+        ? elementsRef.current.filter(el => el.groupId === target.groupId).map(el => el.id)
+        : [id];
+      setSelectedIds(prev => {
+        const allSelected = groupIds.every(groupId => prev.includes(groupId));
+        return allSelected
+          ? prev.filter(sid => !groupIds.includes(sid))
+          : Array.from(new Set([...prev, ...groupIds]));
+      });
     } else {
-      setSelectedIds([id]);
+      const target = elementsRef.current.find(el => el.id === id);
+      if (target?.groupId) {
+        setSelectedIds(elementsRef.current.filter(el => el.groupId === target.groupId).map(el => el.id));
+      } else {
+        setSelectedIds([id]);
+      }
     }
     setSelectedConnectionId(null);
     setIsPropertiesOpen(true);
@@ -1186,6 +1386,29 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       return 'background: transparent;';
     };
 
+    const getExportSvgFill = (fill: any, id: string, fallback: string) => {
+      if (!fill || fill.type === 'none') return { defs: '', fillValue: 'transparent' };
+      if (fill.type !== 'gradient' || !fill.gradient) return { defs: '', fillValue: fallback || fill.color || 'transparent' };
+      const stops = [...fill.gradient.stops]
+        .sort((a, b) => a.offset - b.offset)
+        .map(stop => `<stop offset="${Math.round(stop.offset * 100)}%" stop-color="${escapeHtml(stop.color)}" />`)
+        .join('');
+      const gradientId = `svg-fill-${id}`;
+      if (fill.gradient.type === 'radial') {
+        return {
+          defs: `<defs><radialGradient id="${gradientId}">${stops}</radialGradient></defs>`,
+          fillValue: `url(#${gradientId})`,
+        };
+      }
+      const angle = (fill.gradient.angle * Math.PI) / 180;
+      const x = Math.cos(angle);
+      const y = Math.sin(angle);
+      return {
+        defs: `<defs><linearGradient id="${gradientId}" x1="${50 - x * 50}%" y1="${50 - y * 50}%" x2="${50 + x * 50}%" y2="${50 + y * 50}%">${stops}</linearGradient></defs>`,
+        fillValue: `url(#${gradientId})`,
+      };
+    };
+
     const getExportStrokeCSS = (stroke: any) => {
       const radius = stroke?.radius ?? 0;
       const radiusCSS = radius > 0 ? `border-radius: ${radius}px;` : '';
@@ -1315,7 +1538,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         switch (el.type) {
           case 'text': {
             const safeText = sanitizeHTML(el.text);
-            innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} display: flex; align-items: center; justify-content: center; padding: ${rawEl.text?.padding?.top ?? 10}px ${rawEl.text?.padding?.right ?? 14}px ${rawEl.text?.padding?.bottom ?? 10}px ${rawEl.text?.padding?.left ?? 14}px; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${safeText}</div></div>`;
+            const alignItems = rawEl.text?.verticalAlign === 'top' ? 'flex-start' : rawEl.text?.verticalAlign === 'bottom' ? 'flex-end' : 'center';
+            innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} display: flex; align-items: ${alignItems}; justify-content: center; padding: ${rawEl.text?.padding?.top ?? 10}px ${rawEl.text?.padding?.right ?? 14}px ${rawEl.text?.padding?.bottom ?? 10}px ${rawEl.text?.padding?.left ?? 14}px; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${safeText}</div></div>`;
             break;
           }
           case 'button': {
@@ -1351,7 +1575,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             
             const tag = action === 'link' ? 'a' : 'button';
             const buttonDisabledAttr = (action !== 'link' && el.isDisabled) ? 'disabled' : '';
-            innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} color: ${getAdaptedTextColor(el.color)}; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: ${rawEl.text?.fontWeight ?? 700}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; font-size: ${elAny.fontSize || 16}px; padding: 8px 14px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${safeButtonText}</div></${tag}>`;
+            const alignItems = rawEl.text?.verticalAlign === 'top' ? 'flex-start' : rawEl.text?.verticalAlign === 'bottom' ? 'flex-end' : 'center';
+            innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} color: ${getAdaptedTextColor(el.color)}; cursor: pointer; display: flex; align-items: ${alignItems}; justify-content: center; text-decoration: none; font-weight: ${rawEl.text?.fontWeight ?? 700}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; font-size: ${elAny.fontSize || 16}px; padding: ${rawEl.text?.padding?.top ?? 8}px ${rawEl.text?.padding?.right ?? 14}px ${rawEl.text?.padding?.bottom ?? 8}px ${rawEl.text?.padding?.left ?? 14}px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${safeButtonText}</div></${tag}>`;
             break;
           }
           case 'image': {
@@ -1371,12 +1596,13 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           case 'icon': {
             const svgPath = getIconSvgPath(el.iconName || 'home');
             const iconShadow = getExportSvgShadowCSS(rawEl.shadow);
-            innerContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" width="100%" height="100%" stroke="${el.color || 'var(--text-primary)'}" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block; ${iconShadow}">${svgPath}</svg></div>`;
+            innerContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" width="100%" height="100%" stroke="${el.iconColor || el.color || 'var(--text-primary)'}" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block; ${iconShadow}">${svgPath}</svg></div>`;
             break;
           }
           case 'shape': {
             const hasText = el.text ? true : false;
-            const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 8px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${sanitizeHTML(el.text)}</div></div>` : '';
+            const alignItems = rawEl.text?.verticalAlign === 'top' ? 'flex-start' : rawEl.text?.verticalAlign === 'bottom' ? 'flex-end' : 'center';
+            const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: ${alignItems}; justify-content: center; pointer-events: none; padding: ${rawEl.text?.padding?.top ?? 8}px ${rawEl.text?.padding?.right ?? 8}px ${rawEl.text?.padding?.bottom ?? 8}px ${rawEl.text?.padding?.left ?? 8}px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${sanitizeHTML(el.text)}</div></div>` : '';
             
             if (el.shapeType === 'rectangle') {
               innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} pointer-events: none;">${shapeTextHTML}</div>`;
@@ -1393,7 +1619,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><path d="${d}" fill="none" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" /></svg>${shapeTextHTML}</div>`;
             } else {
               const pts = (SHAPE_POLYGONS as any)[el.shapeType] || SHAPE_POLYGONS.triangle;
-              innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}"><polygon points="${pts}" fill="${el.backgroundColor}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" vector-effect="non-scaling-stroke" /></svg>${shapeTextHTML}</div>`;
+              const svgFill = getExportSvgFill(rawEl.fill, el.id, el.backgroundColor);
+              innerContent = `<div style="position: relative; width: 100%; height: 100%; pointer-events: none;"><svg id="el-${el.id}" width="100%" height="100%" preserveAspectRatio="none" style="overflow: visible; pointer-events: none; ${getExportSvgShadowCSS(rawEl.shadow)}">${svgFill.defs}<polygon points="${pts}" fill="${svgFill.fillValue}" stroke="${rawEl.stroke?.color || getAdaptedBorderColor(el.borderColor)}" stroke-width="${rawEl.stroke?.width ?? el.borderWidth}" stroke-dasharray="${getSvgStrokeDasharray(rawEl.stroke?.style)}" vector-effect="non-scaling-stroke" /></svg>${shapeTextHTML}</div>`;
             }
             break;
           }
@@ -1884,7 +2111,12 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <select id="slide-select" onchange="goToSlide(parseInt(this.value))" tabindex="-1" style="background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 4px 8px; font-size: 13px; font-weight: 600; cursor: pointer; outline: none;"></select>
         <button class="conn-btn" id="next-slide-btn" onclick="nextSlide()" tabindex="-1" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">Next &rarr;</button>
         <div style="width: 1px; background: var(--border-color); height: 20px;"></div>
+        <button class="conn-btn" id="notes-toggle-btn" onclick="toggleSpeakerNotes()" tabindex="-1" style="border-radius: 12px; padding: 6px 12px; border: none; font-size: 13px; cursor: pointer; color: #fff;">Notes</button>
         <button class="conn-btn" onclick="exitPresentation()" tabindex="-1" style="background: #ef5350; border-radius: 12px; padding: 6px 16px; border: none; font-size: 13px; cursor: pointer; color: #fff; font-weight: 600;">Exit</button>
+      </div>
+      <div id="speaker-notes-panel" style="display: none; position: fixed; right: 24px; bottom: 88px; width: min(360px, calc(100vw - 48px)); max-height: min(260px, calc(100vh - 140px)); overflow: auto; background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.55); z-index: 10000; color: var(--text-primary);">
+        <div style="padding: 10px 12px; border-bottom: 1px solid var(--border-color); font-size: 12px; font-weight: 700; display: flex; justify-content: space-between; align-items: center;"><span>Speaker Notes</span><button onclick="toggleSpeakerNotes(false)" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px;">&times;</button></div>
+        <pre id="speaker-notes-text" style="white-space: pre-wrap; margin: 0; padding: 12px; font-family: inherit; font-size: 13px; line-height: 1.45; color: var(--text-secondary);"></pre>
       </div>
       <div class="zoom-controls"><span id="zoom-percent" style="font-weight:700; min-width: 36px; text-align: center; font-size: 12px;">100%</span><button class="btn-fit" id="zoom-fit" style="margin-right: 5px;" title="Fit in view (Ctrl+0)">Fit</button><button class="btn-fit" id="reset-layout" style="background: #e91e63; box-shadow: 0 4px 12px rgba(233, 30, 99, 0.3);">Reset</button></div>
       <div id="notification-toast" class="notification-toast"><div class="notification-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><span id="notification-text"></span></div>
@@ -2502,6 +2734,27 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             );
           }
 
+          function updateSpeakerNotes() {
+            const currentSlide = slides[currentSlideIndex];
+            const notesPanel = document.getElementById('speaker-notes-panel');
+            const notesText = document.getElementById('speaker-notes-text');
+            const notesToggle = document.getElementById('notes-toggle-btn');
+            const notes = currentSlide && currentSlide.speakerNotes ? currentSlide.speakerNotes : '';
+            if (notesText) notesText.textContent = notes || 'No notes for this slide.';
+            if (notesToggle) notesToggle.style.opacity = notes ? '1' : '0.55';
+            if (notesPanel && notesPanel.style.display !== 'none' && !notes) {
+              notesPanel.style.display = 'none';
+            }
+          }
+
+          window.toggleSpeakerNotes = function(force) {
+            const panel = document.getElementById('speaker-notes-panel');
+            if (!panel) return;
+            updateSpeakerNotes();
+            const shouldShow = typeof force === 'boolean' ? force : panel.style.display === 'none';
+            panel.style.display = shouldShow ? 'block' : 'none';
+          };
+
           function updatePresentationControls() {
             const currentSlide = slides[currentSlideIndex];
             const prevBtn = document.getElementById('prev-slide-btn');
@@ -2521,6 +2774,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (selectEl) {
               selectEl.value = currentSlideIndex + '';
             }
+            updateSpeakerNotes();
           }
 
           window.startPresentation = () => {
@@ -2560,6 +2814,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
              document.getElementById('theme-toggle-btn').style.display = 'flex';
              document.getElementById('autoplay-btn').style.display = 'flex';
              document.getElementById('autoplay-settings-btn').style.display = 'flex';
+            const notesPanel = document.getElementById('speaker-notes-panel');
+            if (notesPanel) notesPanel.style.display = 'none';
             const toolbar = document.querySelector('.brush-toolbar');
             const showBtn = document.getElementById('brush-show-btn');
             const isHidden = toolbar.classList.contains('hidden-toolbar');
@@ -2625,6 +2881,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             document.body.classList.remove('presentation-mode');
             const presBar = document.getElementById('presentation-bar');
             if (presBar) presBar.style.display = 'none';
+            const notesPanel = document.getElementById('speaker-notes-panel');
+            if (notesPanel) notesPanel.style.display = 'none';
             playedAnimationIds = [];
             currentSlideIndex = 0;
             slides = [];
@@ -3601,10 +3859,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   return (
     <BuilderContext.Provider value={{ 
       elements, connections, selectedIds, selectedConnectionId, connectingNode, scale, pan, 
-      addElement, updateElement, updateConnection, removeElement, removeSelected, selectElement, selectConnection, 
+      addElement, addSlideNode, duplicateSlideNode, moveSlideNode, updateElement, updateConnection, removeElement, removeSelected, selectElement, selectConnection, 
       setConnectingNode, addConnection, removeConnection, duplicateSelected, 
       setScale, setPan, exportHTML, alignElements, distributeElements, isPresenting, setIsPresenting, editingFocalPointId, setEditingFocalPointId,
-      brushStrokes, isBrushMode, brushColor, brushWidth, setBrushMode, setBrushColor, setBrushWidth, addBrushStroke, clearBrush, undo, redo, saveHistory,
+      brushStrokes, isBrushMode, brushColor, brushWidth, setBrushMode, setBrushColor, setBrushWidth, addBrushStroke, clearBrush, undo, redo, saveHistory, saveHistoryOnce,
       brushTool, setBrushTool, eraseBrushStrokesAt,
       theme, setTheme, guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, setIsSnapEnabled: handleSetIsSnapEnabled,
       isBlurEnabled, setIsBlurEnabled: handleSetIsBlurEnabled,

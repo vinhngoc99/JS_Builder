@@ -136,9 +136,14 @@ export const TopHeader: React.FC = () => {
     showToast('Download started!', 'success');
   };
 
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(htmlCode);
-    showToast('Code copied to clipboard!', 'success');
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(htmlCode);
+      showToast('Code copied to clipboard!', 'success');
+    } catch (error) {
+      console.error('Failed to copy HTML', error);
+      showToast('Clipboard permission denied. Copy the code manually.', 'error');
+    }
   };
 
   return (

@@ -37,6 +37,7 @@ export const Canvas: React.FC = () => {
   const [isLaserActive, setIsLaserActive] = useState(false);
   const [laserPos, setLaserPos] = useState({ x: -100, y: -100 });
   const [laserTrail, setLaserTrail] = useState<{ x: number; y: number }[]>([]);
+  const [showSpeakerNotes, setShowSpeakerNotes] = useState(false);
 
   useEffect(() => {
     if (!isLaserActive) return;
@@ -163,6 +164,8 @@ export const Canvas: React.FC = () => {
   useEffect(() => {
     if (isPresenting) {
       goToSlide(currentSlideIndex);
+    } else {
+      setShowSpeakerNotes(false);
     }
   }, [isPresenting, currentSlideIndex, goToSlide]);
 
@@ -611,6 +614,16 @@ export const Canvas: React.FC = () => {
     .filter(el => el.type === 'node' && (el as any).isSlide !== false)
     .sort((a, b) => a.x - b.x);
   const currentPresentationSlide = presentationSlides[currentSlideIndex];
+  useEffect(() => {
+    if (presentationSlides.length === 0) {
+      if (currentSlideIndex !== 0) setCurrentSlideIndex(0);
+      return;
+    }
+    if (currentSlideIndex > presentationSlides.length - 1) {
+      setCurrentSlideIndex(presentationSlides.length - 1);
+    }
+  }, [currentSlideIndex, presentationSlides.length, setCurrentSlideIndex]);
+
   const hasRemainingAnimationStep = currentPresentationSlide
     ? getSlideAnimationSteps(currentPresentationSlide.id, elements).some(step =>
         !step.animations.every(anim => playedAnimationIds.includes(anim.id))
@@ -1089,6 +1102,16 @@ export const Canvas: React.FC = () => {
           </button>
           
           <div style={{ width: '1px', background: 'var(--border-color)', height: '20px' }} />
+
+          <button
+            className="btn"
+            onClick={() => setShowSpeakerNotes(prev => !prev)}
+            disabled={!currentPresentationSlide?.speakerNotes}
+            tabIndex={-1}
+            style={{ padding: '6px 12px', opacity: currentPresentationSlide?.speakerNotes ? 1 : 0.45, background: 'var(--btn-bg)', color: 'var(--text-primary)', border: 'none', borderRadius: '12px', cursor: currentPresentationSlide?.speakerNotes ? 'pointer' : 'default' }}
+          >
+            Notes
+          </button>
           
           <button 
             className="btn" 
@@ -1098,6 +1121,16 @@ export const Canvas: React.FC = () => {
           >
             Exit
           </button>
+        </div>
+      )}
+
+      {isPresenting && showSpeakerNotes && currentPresentationSlide?.speakerNotes && (
+        <div className="speaker-notes-panel">
+          <div className="speaker-notes-header">
+            <span>Speaker Notes</span>
+            <button onClick={() => setShowSpeakerNotes(false)} tabIndex={-1}>×</button>
+          </div>
+          <pre>{currentPresentationSlide.speakerNotes}</pre>
         </div>
       )}
 

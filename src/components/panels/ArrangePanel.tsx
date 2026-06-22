@@ -8,12 +8,15 @@ interface ArrangePanelProps {
 
 export const ArrangePanel: React.FC<ArrangePanelProps> = ({ elementIds }) => {
   const {
+    elements,
     bringToFront,
     sendToBack,
     bringForward,
     sendBackward,
     alignElements,
     distributeElements,
+    groupElements,
+    ungroupElements,
   } = useBuilder();
 
   const handleArrange = (action: 'front' | 'back' | 'forward' | 'backward') => {
@@ -26,6 +29,11 @@ export const ArrangePanel: React.FC<ArrangePanelProps> = ({ elementIds }) => {
   };
 
   const isMultiSelect = elementIds.length > 1;
+  const selectedGroups = Array.from(new Set(
+    elements
+      .filter(el => elementIds.includes(el.id) && el.groupId)
+      .map(el => el.groupId!)
+  ));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -69,6 +77,30 @@ export const ArrangePanel: React.FC<ArrangePanelProps> = ({ elementIds }) => {
         >
           <ChevronsDown size={16} />
           <span style={{ fontSize: '9px' }}>Back</span>
+        </button>
+      </div>
+
+      <div style={{ fontSize: '11px', color: '#8c8d9c', fontWeight: 600, textTransform: 'uppercase', marginTop: '10px', marginBottom: '2px' }}>
+        Group
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+        <button
+          className="btn"
+          onClick={() => groupElements(elementIds)}
+          disabled={!isMultiSelect}
+          style={{ padding: '7px 4px', fontSize: '10px', opacity: isMultiSelect ? 1 : 0.45 }}
+          title="Group selected elements"
+        >
+          Group
+        </button>
+        <button
+          className="btn"
+          onClick={() => selectedGroups.forEach(groupId => ungroupElements(groupId))}
+          disabled={selectedGroups.length === 0}
+          style={{ padding: '7px 4px', fontSize: '10px', opacity: selectedGroups.length ? 1 : 0.45 }}
+          title="Ungroup selected elements"
+        >
+          Ungroup
         </button>
       </div>
 
