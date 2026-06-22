@@ -66,7 +66,7 @@ export const DEFAULT_DIMENSIONS: Record<string, { width: number; height: number 
   node: { width: 220, height: 250 },
   text: { width: 150, height: 60 },
   button: { width: 120, height: 40 },
-  image: { width: 150, height: 150 },
+  image: { width: 480, height: 270 },
   video: { width: 280, height: 157 },
   shape: { width: 100, height: 100 },
   icon: { width: 60, height: 60 },

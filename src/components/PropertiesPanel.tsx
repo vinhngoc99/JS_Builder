@@ -58,7 +58,31 @@ const Accordion = ({ title, children, defaultOpen = true }: { title: string; chi
   );
 };
 
-const compressImageFile = (file: File): Promise<string> => new Promise((resolve, reject) => {
+const getFittedImageSize = (naturalWidth: number, naturalHeight: number) => {
+  if (!naturalWidth || !naturalHeight) return { width: 480, height: 270 };
+  const maxWidth = 680;
+  const maxHeight = 460;
+  const minLongSide = 360;
+  const longSide = Math.max(naturalWidth, naturalHeight);
+  const fitScale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight);
+  const scale = fitScale < 1
+    ? fitScale
+    : Math.max(1, Math.min(fitScale, minLongSide / longSide));
+
+  return {
+    width: Math.max(80, Math.round(naturalWidth * scale)),
+    height: Math.max(80, Math.round(naturalHeight * scale)),
+  };
+};
+
+const loadImageDimensions = (src: string): Promise<{ width: number; height: number }> => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+  img.onerror = () => reject(new Error('Could not load image dimensions.'));
+  img.src = src;
+});
+
+const compressImageFile = (file: File): Promise<{ src: string; width: number; height: number }> => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onerror = () => reject(new Error('Could not read image file.'));
   reader.onload = () => {
@@ -79,7 +103,11 @@ const compressImageFile = (file: File): Promise<string> => new Promise((resolve,
       }
       ctx.drawImage(img, 0, 0, width, height);
       const mime = file.type === 'image/png' && file.size < 500_000 ? 'image/png' : 'image/jpeg';
-      resolve(canvas.toDataURL(mime, mime === 'image/jpeg' ? 0.82 : undefined));
+      resolve({
+        src: canvas.toDataURL(mime, mime === 'image/jpeg' ? 0.82 : undefined),
+        width,
+        height,
+      });
     };
     img.src = String(reader.result || '');
   };
@@ -96,6 +124,7 @@ export const PropertiesPanel: React.FC = () => {
   const [previewMode, setPreviewMode] = React.useState(false);
   const [htmlCode, setHtmlCode] = React.useState('');
   const [previewUrl, setPreviewUrl] = React.useState('');
+  const imageLoadRequestRef = React.useRef(0);
 
   React.useEffect(() => {
     if (!modalOpen || !previewMode || !htmlCode) {
@@ -395,7 +424,12 @@ export const PropertiesPanel: React.FC = () => {
         }
         if (targetEl.type === 'image') {
           const img = new Image();
-          img.onload = () => { const maxWidth = 500; let newW = img.width, newH = img.height; if (newW > maxWidth) { const r = maxWidth / newW; newW = maxWidth; newH = img.height * r; } updateElement(targetEl.id, { width: newW, height: newH, src: val as string }); };
+          img.onload = () => {
+            updateElement(targetEl.id, {
+              ...getFittedImageSize(img.naturalWidth || img.width, img.naturalHeight || img.height),
+              src: val as string,
+            });
+          };
           img.src = val as string;
           return;
         }
@@ -439,6 +473,27 @@ export const PropertiesPanel: React.FC = () => {
     selectedIds.forEach(id => {
       updateElement(id, updates);
     });
+  };
+
+  const updateSelectedImageSource = async (src: string, extraUpdates: Record<string, any> = {}) => {
+    const requestId = ++imageLoadRequestRef.current;
+    if (!selectedElement || selectedElement.type !== 'image') {
+      handlePanelChange({ src, ...extraUpdates });
+      return;
+    }
+
+    try {
+      const size = await loadImageDimensions(src);
+      if (requestId !== imageLoadRequestRef.current) return;
+      handlePanelChange({
+        src,
+        ...getFittedImageSize(size.width, size.height),
+        ...extraUpdates,
+      } as any);
+    } catch {
+      if (requestId !== imageLoadRequestRef.current) return;
+      handlePanelChange({ src, ...extraUpdates });
+    }
   };
 
   const el = selectedElement ? compat(selectedElement) as any : null;
@@ -883,7 +938,11 @@ export const PropertiesPanel: React.FC = () => {
                     if (selectedElement!.type === 'image') finalVal = `https://lh3.googleusercontent.com/d/${driveMatch[1]}`;
                     else if (selectedElement!.type === 'video') finalVal = `https://drive.google.com/file/d/${driveMatch[1]}/preview`;
                   }
-                  handlePanelChange({ src: finalVal });
+                  if (selectedElement!.type === 'image') {
+                    void updateSelectedImageSource(finalVal);
+                  } else {
+                    handlePanelChange({ src: finalVal });
+                  }
                 }} 
                 style={{ width: '100%' }}
                 placeholder="https://..."
@@ -901,9 +960,10 @@ export const PropertiesPanel: React.FC = () => {
                           await showAlert('Image is too large. Please choose an image under 12MB.', 'Upload image');
                           return;
                         }
-                        const src = await compressImageFile(file);
+                        const compressed = await compressImageFile(file);
                         handlePanelChange({
-                          src,
+                          src: compressed.src,
+                          ...getFittedImageSize(compressed.width, compressed.height),
                           alt: file.name,
                         } as any);
                       } catch (error) {
