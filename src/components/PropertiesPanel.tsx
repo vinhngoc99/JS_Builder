@@ -32,7 +32,7 @@ const Toggle = ({ label, checked, onChange, color = '#4caf50' }: { label: string
 const Accordion = ({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) => {
   const [isOpen, setIsOpen] = React.useState(defaultOpen);
   return (
-    <div style={{ marginBottom: '8px', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+    <div style={{ marginBottom: '8px', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
       <div 
         onClick={() => setIsOpen(!isOpen)}
         style={{ 
@@ -42,22 +42,21 @@ const Accordion = ({ title, children, defaultOpen = true }: { title: string; chi
           display: 'flex', 
           justifyContent: 'space-between', 
           alignItems: 'center',
-          userSelect: 'none'
+          userSelect: 'none',
+          borderRadius: isOpen ? '8px 8px 0 0' : '8px'
         }}
       >
         <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{title}</span>
         <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{isOpen ? '▼' : '▶'}</span>
       </div>
       {isOpen && (
-        <div style={{ padding: '12px', background: 'var(--bg-toolbar)', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ padding: '12px', background: 'var(--bg-toolbar)', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px', borderRadius: '0 0 8px 8px' }}>
           {children}
         </div>
       )}
     </div>
   );
 };
-
-
 
 export const PropertiesPanel: React.FC = () => {
   const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory } = useBuilder();
@@ -641,8 +640,7 @@ export const PropertiesPanel: React.FC = () => {
         <Accordion title="Animations" defaultOpen={false}>
           <AnimationPanel element={selectedElement!} onChange={handlePanelChange} />
         </Accordion>
-
-        {/* Fill (Only for nodes, shapes, texts, buttons) */}
+        {/* Fill (Only for nodes, shapes, texts, buttons) */}
         {['node', 'shape', 'text', 'button'].includes(selectedElement!.type) && (
           <Accordion title="Fill / Background" defaultOpen={true}>
             <FillPanel element={selectedElement!} onChange={handlePanelChange} />
@@ -656,8 +654,8 @@ export const PropertiesPanel: React.FC = () => {
           </Accordion>
         )}
 
-        {/* Shadow (Only for nodes, shapes, images, videos) */}
-        {['node', 'shape', 'image', 'video'].includes(selectedElement!.type) && (
+        {/* Shadow (For all elements) */}
+        {['node', 'shape', 'image', 'video', 'text', 'button', 'icon'].includes(selectedElement!.type) && (
           <Accordion title="Drop Shadow" defaultOpen={false}>
             <ShadowPanel element={selectedElement!} onChange={handlePanelChange} />
           </Accordion>

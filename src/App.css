@@ -1571,4 +1571,30 @@ kbd {
   }
 }
 
+/* SketchPicker overrides: force HEX-first, hide RGB/HSL toggle & fields */
+.sketch-picker {
+  background: #1e1f2e !important;
+}
 
+/* Hide the RGB/HSL toggle labels (the small text labels like R, G, B, H, S, L) */
+.sketch-picker .flexbox-fix:last-child > div:last-child > div:nth-child(n+2) {
+  display: none !important;
+}
+
+/* Style the HEX input to match dark theme */
+.sketch-picker input {
+  background: #14151f !important;
+  color: #e0e0e0 !important;
+  border-color: #3a3c50 !important;
+  box-shadow: none !important;
+  font-family: 'Fira Code', monospace !important;
+}
+
+.sketch-picker label {
+  color: #8c8d9c !important;
+}
+
+/* Hide the color mode toggle arrow (switches between hex/rgb/hsl) */
+.sketch-picker .flexbox-fix:last-child > div:last-child > div:last-child svg {
+  display: none !important;
+}

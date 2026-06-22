@@ -239,6 +239,9 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               savedRangeRef.current = saveSelection();
             }}
             onChange={(e) => {
+              if (editableRef.current) {
+                editableRef.current.focus();
+              }
               restoreSelection(savedRangeRef.current);
               document.execCommand('foreColor', false, e.target.value);
             }}
@@ -793,12 +796,19 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   outline: 'none',
                   userSelect: 'text',
                   wordBreak: 'break-word',
-                  lineHeight: '1.5'
+                  lineHeight: element.lineHeight || 1.5,
+                  letterSpacing: `${element.letterSpacing || 0}px`
                 }}
                 onPaste={(e) => {
                   e.preventDefault();
                   const text = e.clipboardData.getData('text/plain');
                   document.execCommand('insertText', false, text);
+                }}
+                onKeyUp={() => {
+                  savedRangeRef.current = saveSelection();
+                }}
+                onMouseUp={() => {
+                  savedRangeRef.current = saveSelection();
                 }}
               />
             </div>
@@ -812,8 +822,10 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               fontSize: element.fontSize, 
               fontFamily: element.fontFamily, 
               backgroundColor: element.backgroundColor, 
-              border: `${element.borderWidth}px solid ${getAdaptedBorderColor(element.borderColor)}`, 
-              borderRadius: element.borderRadius, 
+              borderWidth: `${element.stroke?.width ?? 0}px`,
+              borderStyle: element.stroke?.style || 'solid',
+              borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'),
+              borderRadius: `${element.stroke?.radius ?? 0}px`,
               width: '100%', 
               height: '100%', 
               display: 'flex', 
@@ -822,7 +834,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               wordBreak: 'break-word',
               overflow: 'hidden',
               padding: '10px 14px',
-              lineHeight: '1.5',
+              lineHeight: element.lineHeight || 1.5,
+              letterSpacing: `${element.letterSpacing || 0}px`,
               boxSizing: 'border-box'
             }}
           >
@@ -831,7 +844,9 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               style={{
                 width: '100%',
                 textAlign: element.textAlign || 'center',
-                wordBreak: 'break-word'
+                wordBreak: 'break-word',
+                lineHeight: element.lineHeight || 1.5,
+                letterSpacing: `${element.letterSpacing || 0}px`
               }}
               dangerouslySetInnerHTML={{ __html: element.text }}
             />
@@ -882,12 +897,19 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   fontWeight: 'bold',
                   userSelect: 'text',
                   wordBreak: 'break-word',
-                  lineHeight: '1.5'
+                  lineHeight: element.lineHeight || 1.5,
+                  letterSpacing: `${element.letterSpacing || 0}px`
                 }}
                 onPaste={(e) => {
                   e.preventDefault();
                   const text = e.clipboardData.getData('text/plain');
                   document.execCommand('insertText', false, text);
+                }}
+                onKeyUp={() => {
+                  savedRangeRef.current = saveSelection();
+                }}
+                onMouseUp={() => {
+                  savedRangeRef.current = saveSelection();
                 }}
               />
             </div>
@@ -955,27 +977,32 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               color: getAdaptedTextColor(element.color), 
               fontFamily: element.fontFamily, 
               fontSize: `${elAny.fontSize || 16}px`, 
-              borderRadius: `${element.borderRadius}px`, 
               width: '100%', 
               height: '100%', 
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center', 
               fontWeight: 'bold',
-              border: 'none',
               cursor: isPresenting ? 'pointer' : 'default',
               pointerEvents: 'auto',
               transition: 'opacity 0.2s, transform 0.1s',
               padding: '8px 14px',
-              lineHeight: '1.5',
-              boxSizing: 'border-box'
+              lineHeight: element.lineHeight || 1.5,
+              letterSpacing: `${element.letterSpacing || 0}px`,
+              boxSizing: 'border-box',
+              borderWidth: `${element.stroke?.width ?? 0}px`,
+              borderStyle: element.stroke?.style || 'solid',
+              borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'),
+              borderRadius: `${element.stroke?.radius ?? 6}px`,
             }}
           >
             <div
               style={{
                 width: '100%',
                 textAlign: element.textAlign || 'center',
-                wordBreak: 'break-word'
+                wordBreak: 'break-word',
+                lineHeight: element.lineHeight || 1.5,
+                letterSpacing: `${element.letterSpacing || 0}px`
               }}
               dangerouslySetInnerHTML={{ __html: element.text }}
             />
@@ -994,7 +1021,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   <div style={{ color: '#fff', fontSize: '10px', background: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px', position: 'absolute', bottom: '10px' }}>Drag to pan image</div>
                 </div>
               )}
-              <img src={element.src} alt={element.alt} style={{ width: '100%', height: '100%', objectFit: element.objectFit, objectPosition: objPos, border: `${element.borderWidth}px solid ${element.borderColor}`, borderRadius: `${element.borderRadius}px`, boxSizing: 'border-box' }} draggable={false} />
+              <img src={element.src} alt={element.alt} style={{ width: '100%', height: '100%', objectFit: element.objectFit, objectPosition: objPos, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: `${element.stroke?.radius ?? 0}px`, boxSizing: 'border-box' }} draggable={false} />
             </div>
           </div>
         );
@@ -1005,7 +1032,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
              <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }} onPointerDown={handleFocalPointPointerDown}>
                <div className="media-settings-btn" style={{ pointerEvents: 'auto' }} onClick={(e) => { e.stopPropagation(); setEditingFocalPointId(isEditingFocalPoint ? null : element.id); }} title="Set Video Alignment"><Settings size={14} /></div>
                {isEditingFocalPoint && <div className="focal-point-overlay" style={{ cursor: 'move' }}><div style={{ color: '#fff', fontSize: '10px', background: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px' }}>Drag to align video</div></div>}
-              <div style={{ width: '100%', height: '100%', pointerEvents: 'none' }}><iframe src={element.src} style={{ width: '100%', height: '100%', objectFit: 'cover', border: `${element.borderWidth}px solid ${element.borderColor}`, borderRadius: `${element.borderRadius}px`, boxSizing: 'border-box' }} frameBorder="0" allowFullScreen /></div>
+              <div style={{ width: '100%', height: '100%', pointerEvents: 'none' }}><iframe src={element.src} style={{ width: '100%', height: '100%', objectFit: 'cover', borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: `${element.stroke?.radius ?? 0}px`, boxSizing: 'border-box' }} frameBorder="0" allowFullScreen /></div>
              </div>
           </div>
         );
@@ -1057,12 +1084,20 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   textAlign: elAny.textAlign || 'center',
                   outline: 'none',
                   userSelect: 'text',
-                  wordBreak: 'break-word'
+                  wordBreak: 'break-word',
+                  lineHeight: element.lineHeight || 1.5,
+                  letterSpacing: `${element.letterSpacing || 0}px`
                 }}
                 onPaste={(e) => {
                   e.preventDefault();
                   const text = e.clipboardData.getData('text/plain');
                   document.execCommand('insertText', false, text);
+                }}
+                onKeyUp={() => {
+                  savedRangeRef.current = saveSelection();
+                }}
+                onMouseUp={() => {
+                  savedRangeRef.current = saveSelection();
                 }}
               />
             </div>
@@ -1092,7 +1127,9 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   fontSize: `${elAny.fontSize || 14}px`, 
                   fontFamily: elAny.fontFamily || 'sans-serif', 
                   textAlign: elAny.textAlign || 'center',
-                  wordBreak: 'break-word'
+                  wordBreak: 'break-word',
+                  lineHeight: element.lineHeight || 1.5,
+                  letterSpacing: `${element.letterSpacing || 0}px`
                 }}
                 dangerouslySetInnerHTML={{ __html: shapeText }}
               />
@@ -1106,8 +1143,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               style={{ position: 'relative', width: '100%', height: '100%' }}
               onDoubleClick={() => setIsEditingText(true)}
             >
-              <svg width="100%" height="100%" style={{ overflow: 'visible' }}>
-                <line x1="0" y1="0" x2={element.width} y2={element.height} stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} />
+              <svg width="100%" height="100%" style={{ overflow: 'visible', filter: element.shadow?.enabled ? `drop-shadow(${element.shadow.offsetX}px ${element.shadow.offsetY}px ${element.shadow.blur}px ${element.shadow.color})` : undefined }}>
+                <line x1="0" y1="0" x2={element.width} y2={element.height} stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} strokeDasharray={element.stroke?.style === 'dashed' ? '8 4' : element.stroke?.style === 'dotted' ? '2 2' : undefined} />
               </svg>
               {shapeTextOverlay}
             </div>
@@ -1120,7 +1157,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               style={{ position: 'relative', width: '100%', height: '100%' }}
               onDoubleClick={() => setIsEditingText(true)}
             >
-              <svg width="100%" height="100%" style={{ overflow: 'visible' }}>
+              <svg width="100%" height="100%" style={{ overflow: 'visible', filter: element.shadow?.enabled ? `drop-shadow(${element.shadow.offsetX}px ${element.shadow.offsetY}px ${element.shadow.blur}px ${element.shadow.color})` : undefined }}>
                 <defs>
                   <marker 
                     id={markerId} 
@@ -1141,6 +1178,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   y2={element.height} 
                   stroke={getAdaptedBorderColor(element.borderColor)} 
                   strokeWidth={element.borderWidth} 
+                  strokeDasharray={element.stroke?.style === 'dashed' ? '8 4' : element.stroke?.style === 'dotted' ? '2 2' : undefined}
                   markerEnd={`url(#${markerId})`} 
                 />
               </svg>
@@ -1156,8 +1194,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               style={{ position: 'relative', width: '100%', height: '100%' }}
               onDoubleClick={() => setIsEditingText(true)}
             >
-              <svg width="100%" height="100%" style={{ overflow: 'visible' }}>
-                <path d={d} fill="none" stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} />
+              <svg width="100%" height="100%" style={{ overflow: 'visible', filter: element.shadow?.enabled ? `drop-shadow(${element.shadow.offsetX}px ${element.shadow.offsetY}px ${element.shadow.blur}px ${element.shadow.color})` : undefined }}>
+                <path d={d} fill="none" stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} strokeDasharray={element.stroke?.style === 'dashed' ? '8 4' : element.stroke?.style === 'dotted' ? '2 2' : undefined} />
               </svg>
               {shapeTextOverlay}
             </div>
@@ -1167,7 +1205,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         if (element.shapeType === 'rectangle') {
           return (
             <div 
-              style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: element.backgroundColor, border: `${element.borderWidth}px solid ${getAdaptedBorderColor(element.borderColor)}`, borderRadius: element.borderRadius }}
+              style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: element.backgroundColor, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: `${element.stroke?.radius ?? 0}px` }}
               onDoubleClick={() => setIsEditingText(true)}
             >
               {shapeTextOverlay}
@@ -1177,7 +1215,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         if (element.shapeType === 'ellipse') {
           return (
             <div 
-              style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: element.backgroundColor, border: `${element.borderWidth}px solid ${getAdaptedBorderColor(element.borderColor)}`, borderRadius: '50%' }}
+              style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: element.backgroundColor, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: '50%' }}
               onDoubleClick={() => setIsEditingText(true)}
             >
               {shapeTextOverlay}
@@ -1206,8 +1244,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
             style={{ position: 'relative', width: '100%', height: '100%' }}
             onDoubleClick={() => setIsEditingText(true)}
           >
-            <svg width="100%" height="100%" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
-              <polygon points={shapePts} fill={element.backgroundColor} stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} vectorEffect="non-scaling-stroke" />
+            <svg width="100%" height="100%" preserveAspectRatio="none" style={{ overflow: 'visible', filter: element.shadow?.enabled ? `drop-shadow(${element.shadow.offsetX}px ${element.shadow.offsetY}px ${element.shadow.blur}px ${element.shadow.color})` : undefined }}>
+              <polygon points={shapePts} fill={element.backgroundColor} stroke={getAdaptedBorderColor(element.borderColor)} strokeWidth={element.borderWidth} strokeDasharray={element.stroke?.style === 'dashed' ? '8 4' : element.stroke?.style === 'dotted' ? '2 2' : undefined} vectorEffect="non-scaling-stroke" />
             </svg>
             {shapeTextOverlay}
           </div>
@@ -1226,7 +1264,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
               strokeWidth="2" 
               strokeLinecap="round" 
               strokeLinejoin="round"
-              style={{ display: 'block' }}
+              style={{ display: 'block', filter: element.shadow?.enabled ? `drop-shadow(${element.shadow.offsetX}px ${element.shadow.offsetY}px ${element.shadow.blur}px ${element.shadow.color})` : undefined }}
             >
               <g dangerouslySetInnerHTML={{ __html: svgPath }} />
             </svg>
@@ -1248,7 +1286,20 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
       ref={wrapperRef}
       className={`element-wrapper ${element.type === 'node' ? 'is-node' : ''} ${element.type === 'button' ? 'is-button' : ''} ${isSelected ? 'selected' : ''} ${isConnectingToThis ? 'connecting' : ''} ${element.isDisabled ? 'disabled' : ''} ${element.isHidden ? 'is-hidden' : ''} ${isBrushMode ? 'pointer-events-none' : ''}`}
       data-id={element.id}
-      style={{ left: isFillParent ? 0 : element.x, top: isFillParent ? 0 : element.y, width: isFillParent ? '100%' : element.width, height: isFillParent ? '100%' : element.height, transform: isFillParent ? 'none' : `rotate(${element.rotation || 0}deg)`, backgroundColor: element.type === 'node' ? getAdaptedBgColor('node', element.backgroundColor) : undefined, pointerEvents: isBrushMode ? 'none' : 'auto' }}
+      style={{ 
+        left: isFillParent ? 0 : element.x, 
+        top: isFillParent ? 0 : element.y, 
+        width: isFillParent ? '100%' : element.width, 
+        height: isFillParent ? '100%' : element.height, 
+        transform: isFillParent ? 'none' : `rotate(${element.rotation || 0}deg)`, 
+        backgroundColor: element.type === 'node' ? getAdaptedBgColor('node', element.backgroundColor) : undefined, 
+        pointerEvents: isBrushMode ? 'none' : 'auto',
+        borderWidth: element.type === 'node' ? `${element.stroke?.width ?? 1}px` : undefined,
+        borderStyle: element.type === 'node' ? (element.stroke?.style || 'solid') : undefined,
+        borderColor: element.type === 'node' ? getAdaptedBorderColor(element.stroke?.color || 'var(--border-color)') : undefined,
+        borderRadius: ['node', 'text', 'button', 'image', 'video'].includes(element.type) ? `${element.stroke?.radius ?? (element.type === 'node' ? 10 : element.type === 'button' ? 6 : 0)}px` : undefined,
+        boxShadow: element.type !== 'shape' && element.type !== 'icon' && element.shadow?.enabled ? `${element.shadow.offsetX}px ${element.shadow.offsetY}px ${element.shadow.blur}px ${element.shadow.spread || 0}px ${element.shadow.color}` : undefined,
+      }}
       onPointerDown={handlePointerDown}
       onDoubleClick={(e) => {
         if (isPresenting) return;

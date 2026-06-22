@@ -42,6 +42,10 @@ export function compat(el: CanvasElement): CanvasElement & Record<string, any> {
       if (prop === 'borderColor') return target.stroke?.color || 'transparent';
       if (prop === 'borderRadius') return target.stroke?.radius ?? 0;
       
+      // Text spacing properties
+      if (prop === 'lineHeight') return target.text?.lineHeight ?? 1.5;
+      if (prop === 'letterSpacing') return target.text?.letterSpacing ?? 0;
+      
       // Text properties
       if (prop === 'text' && target.text !== null && typeof target.text === 'object') {
         // Already handled by direct access — 'text' is now a TextStyle object
@@ -122,6 +126,9 @@ export function compat(el: CanvasElement): CanvasElement & Record<string, any> {
       if (prop === 'borderWidth') { target.stroke = { ...target.stroke, width: value }; return true; }
       if (prop === 'borderColor') { target.stroke = { ...target.stroke, color: value }; return true; }
       if (prop === 'borderRadius') { target.stroke = { ...target.stroke, radius: value }; return true; }
+      
+      if (prop === 'lineHeight' && target.text) { target.text = { ...target.text, lineHeight: value }; return true; }
+      if (prop === 'letterSpacing' && target.text) { target.text = { ...target.text, letterSpacing: value }; return true; }
       if (prop === 'color' && target.text) { target.text = { ...target.text, color: value }; return true; }
       if (prop === 'fontSize' && target.text) { target.text = { ...target.text, fontSize: value }; return true; }
       if (prop === 'fontFamily' && target.text) { target.text = { ...target.text, fontFamily: value }; return true; }

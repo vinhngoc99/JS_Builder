@@ -1187,8 +1187,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
 
     const getExportStrokeCSS = (stroke: any) => {
-      if (!stroke || stroke.width === 0) return 'border: none;';
-      return `border-width: ${stroke.width}px; border-style: ${stroke.style || 'solid'}; border-color: ${stroke.color || 'var(--border-color)'}; border-radius: ${stroke.radius}px;`;
+      const radius = stroke?.radius ?? 0;
+      const radiusCSS = radius > 0 ? `border-radius: ${radius}px;` : '';
+      if (!stroke || stroke.width === 0) return `border: none; ${radiusCSS}`;
+      return `border-width: ${stroke.width}px; border-style: ${stroke.style || 'solid'}; border-color: ${stroke.color || 'var(--border-color)'}; ${radiusCSS}`;
     };
 
     const getExportShadowCSS = (shadow: any) => {
@@ -1267,13 +1269,17 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
         const innerVisibilityStyle = el.isHidden ? 'opacity: 0; pointer-events: none;' : '';
 
-        const shadowStyle = (el.type === 'node' || el.type === 'text' || el.type === 'button') 
+        const shadowStyle = (el.type !== 'shape' && el.type !== 'icon') 
           ? getExportShadowCSS(rawEl.shadow) 
           : '';
 
+        const radiusCSS = ['node', 'text', 'button', 'image', 'video'].includes(el.type) 
+          ? `border-radius: ${rawEl.stroke?.radius ?? (el.type === 'node' ? 10 : el.type === 'button' ? 6 : 0)}px;` 
+          : '';
+
         const baseStyle = isFillParent 
-          ? `position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--text-primary); --element-transform: rotate(0deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} transition: opacity 0.4s ease; ${visibilityStyle}`
-          : `position: absolute; left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; color: var(--text-primary); --element-transform: rotate(${el.rotation || 0}deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} transition: opacity 0.4s ease; ${visibilityStyle}`;
+          ? `position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--text-primary); --element-transform: rotate(0deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} ${radiusCSS} transition: opacity 0.4s ease; ${visibilityStyle}`
+          : `position: absolute; left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; color: var(--text-primary); --element-transform: rotate(${el.rotation || 0}deg); transform: var(--element-transform); transform-origin: center center; z-index: ${el.zIndex ?? (el.type === 'node' ? 1 : 2)}; opacity: ${el.opacity ?? 1}; ${shadowStyle} ${radiusCSS} transition: opacity 0.4s ease; ${visibilityStyle}`;
         
         let expandBtnHTML = '';
         if (el.enableExpandButton) {
@@ -1309,7 +1315,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         switch (el.type) {
           case 'text': {
             const safeText = sanitizeHTML(el.text);
-            innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} display: flex; align-items: center; justify-content: center; padding: ${rawEl.text?.padding?.top ?? 10}px ${rawEl.text?.padding?.right ?? 14}px ${rawEl.text?.padding?.bottom ?? 10}px ${rawEl.text?.padding?.left ?? 14}px; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeText}</div></div>`;
+            innerContent = `<div id="el-${el.id}" style="width: 100%; height: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize}px; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} display: flex; align-items: center; justify-content: center; padding: ${rawEl.text?.padding?.top ?? 10}px ${rawEl.text?.padding?.right ?? 14}px ${rawEl.text?.padding?.bottom ?? 10}px ${rawEl.text?.padding?.left ?? 14}px; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; box-sizing: border-box; overflow: hidden; pointer-events: none;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${safeText}</div></div>`;
             break;
           }
           case 'button': {
@@ -1345,7 +1351,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             
             const tag = action === 'link' ? 'a' : 'button';
             const buttonDisabledAttr = (action !== 'link' && el.isDisabled) ? 'disabled' : '';
-            innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} color: ${getAdaptedTextColor(el.color)}; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: ${rawEl.text?.fontWeight ?? 700}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; font-size: ${elAny.fontSize || 16}px; padding: 8px 14px; line-height: 1.5; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: 1.5;">${safeButtonText}</div></${tag}>`;
+            innerContent = `<${tag} id="el-${el.id}" ${onClickAttr} ${buttonDisabledAttr} class="${el.isDisabled ? 'disabled' : ''}" style="width: 100%; height: 100%; font-family: ${el.fontFamily}; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} color: ${getAdaptedTextColor(el.color)}; cursor: pointer; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: ${rawEl.text?.fontWeight ?? 700}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; font-size: ${elAny.fontSize || 16}px; padding: 8px 14px; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px; box-sizing: border-box;"><div style="width: 100%; text-align: ${el.textAlign || 'center'}; word-break: break-word; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${safeButtonText}</div></${tag}>`;
             break;
           }
           case 'image': {
@@ -1364,12 +1370,13 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
           case 'icon': {
             const svgPath = getIconSvgPath(el.iconName || 'home');
-            innerContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" width="100%" height="100%" stroke="${el.color || 'var(--text-primary)'}" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;">${svgPath}</svg></div>`;
+            const iconShadow = getExportSvgShadowCSS(rawEl.shadow);
+            innerContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" width="100%" height="100%" stroke="${el.color || 'var(--text-primary)'}" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block; ${iconShadow}">${svgPath}</svg></div>`;
             break;
           }
           case 'shape': {
             const hasText = el.text ? true : false;
-            const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 8px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'};">${sanitizeHTML(el.text)}</div></div>` : '';
+            const shapeTextHTML = hasText ? `<div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 8px; box-sizing: border-box; overflow: hidden;"><div style="width: 100%; color: ${getAdaptedTextColor(el.color)}; font-size: ${el.fontSize || 14}px; font-family: ${el.fontFamily || 'sans-serif'}; text-align: ${el.textAlign || 'center'}; word-break: break-word; font-weight: ${rawEl.text?.fontWeight ?? 400}; font-style: ${rawEl.text?.fontStyle ?? 'normal'}; text-decoration: ${rawEl.text?.textDecoration ?? 'none'}; line-height: ${rawEl.text?.lineHeight ?? 1.5}; letter-spacing: ${rawEl.text?.letterSpacing ?? 0}px;">${sanitizeHTML(el.text)}</div></div>` : '';
             
             if (el.shapeType === 'rectangle') {
               innerContent = `<div id="el-${el.id}" style="position: relative; width: 100%; height: 100%; ${getExportFillCSS(rawEl.fill)} ${getExportStrokeCSS(rawEl.stroke)} pointer-events: none;">${shapeTextHTML}</div>`;

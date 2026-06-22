@@ -7,8 +7,10 @@ export const Toolbar: React.FC = () => {
   const { addElement, selectedIds, duplicateSelected, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isHelpOpen, setIsHelpOpen } = useBuilder();
   const [isShapeOpen, setIsShapeOpen] = useState(false);
   const [isIconOpen, setIsIconOpen] = useState(false);
+  const [isTextOpen, setIsTextOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const iconPopoverRef = useRef<HTMLDivElement>(null);
+  const textPopoverRef = useRef<HTMLDivElement>(null);
 
   const hasSelection = selectedIds.length > 0;
 
@@ -18,12 +20,15 @@ export const Toolbar: React.FC = () => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setIsShapeOpen(false);
       }
+      if (textPopoverRef.current && !textPopoverRef.current.contains(e.target as Node)) {
+        setIsTextOpen(false);
+      }
     };
-    if (isShapeOpen) {
+    if (isShapeOpen || isTextOpen) {
       document.addEventListener('mousedown', clickOutside);
     }
     return () => document.removeEventListener('mousedown', clickOutside);
-  }, [isShapeOpen]);
+  }, [isShapeOpen, isTextOpen]);
 
   // Handle clicking outside the icon popover to close it
   useEffect(() => {
@@ -74,8 +79,56 @@ export const Toolbar: React.FC = () => {
       <div className="toolbar-item" onClick={() => addElement('video')} title="Add Video">
         <Video size={22} />
       </div>
-      <div className="toolbar-item" onClick={() => addElement('text')} title="Add Text">
+      <div 
+        className={`toolbar-item ${isTextOpen ? 'active' : ''}`} 
+        onClick={() => setIsTextOpen(!isTextOpen)} 
+        title="Add Text"
+        style={{ position: 'relative' }}
+      >
         <Type size={22} />
+        {isTextOpen && (
+          <div 
+            ref={textPopoverRef}
+            className="shape-popover"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '180px' }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', padding: '8px', gap: '4px' }}>
+              <div 
+                className="shape-popover-item"
+                style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 'bold', fontSize: '24px', borderRadius: '4px', cursor: 'pointer' }}
+                onClick={() => {
+                  addElement('text', undefined, { text: { content: 'Heading 1', fontSize: 32, fontWeight: 700 } } as any);
+                  setIsTextOpen(false);
+                }}
+              >Heading 1</div>
+              <div 
+                className="shape-popover-item"
+                style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 'bold', fontSize: '18px', borderRadius: '4px', cursor: 'pointer' }}
+                onClick={() => {
+                  addElement('text', undefined, { text: { content: 'Heading 2', fontSize: 24, fontWeight: 600 } } as any);
+                  setIsTextOpen(false);
+                }}
+              >Heading 2</div>
+              <div 
+                className="shape-popover-item"
+                style={{ padding: '8px 12px', textAlign: 'left', fontSize: '14px', borderRadius: '4px', cursor: 'pointer' }}
+                onClick={() => {
+                  addElement('text', undefined, { text: { content: 'Paragraph', fontSize: 16, fontWeight: 400 } } as any);
+                  setIsTextOpen(false);
+                }}
+              >Normal Text</div>
+              <div 
+                className="shape-popover-item"
+                style={{ padding: '8px 12px', textAlign: 'left', fontSize: '11px', color: '#8c8d9c', borderRadius: '4px', cursor: 'pointer' }}
+                onClick={() => {
+                  addElement('text', undefined, { text: { content: 'Small Text', fontSize: 12, fontWeight: 400, color: '#8c8d9c' } } as any);
+                  setIsTextOpen(false);
+                }}
+              >Small Text</div>
+            </div>
+          </div>
+        )}
       </div>
       <div className="toolbar-item" onClick={() => addElement('button')} title="Add Button">
         <MousePointerClick size={22} />
