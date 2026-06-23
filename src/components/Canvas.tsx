@@ -30,6 +30,8 @@ export const Canvas: React.FC = () => {
   const [isErasing, setIsErasing] = useState(false);
   const lastEraserPos = useRef<{ x: number, y: number } | null>(null);
   const brushCursorRef = useRef<HTMLDivElement>(null);
+  const isResizingBrushRef = useRef(false);
+  const startResizeInfoRef = useRef({ x: 0, width: 0 });
   
   const [snapGuides, setSnapGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const [draggedGuide, setDraggedGuide] = useState<{ id: string; type: 'horizontal' | 'vertical'; isNew: boolean } | null>(null);
@@ -289,12 +291,20 @@ export const Canvas: React.FC = () => {
 
       // Zoom to Fit
       if (e.ctrlKey && e.key === '0' && !isInput) { e.preventDefault(); zoomToFit(); }
+      if (e.ctrlKey && (e.key === '=' || e.key === '+') && !isInput) {
+        e.preventDefault();
+        setBrushWidth(Math.min(100, brushWidth + 5));
+      }
+      if (e.ctrlKey && e.key === '-' && !isInput) {
+        e.preventDefault();
+        setBrushWidth(Math.max(1, brushWidth - 5));
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') { setIsSpaceDown(false); setIsPanning(false); } };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool, zoomToFit]);
+  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool, zoomToFit, brushWidth, setBrushWidth]);
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -313,6 +323,11 @@ export const Canvas: React.FC = () => {
   }, [scale, pan, setScale, setPan]);
 
   const handleCanvasPointerDown = (e: React.PointerEvent) => {
+    if (e.altKey && e.button === 2) {
+      isResizingBrushRef.current = true;
+      startResizeInfoRef.current = { x: e.clientX, width: brushWidth };
+      return;
+    }
     if (contextMenu) setContextMenu(null);
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = (e.clientX - rect.left - pan.x) / scale, y = (e.clientY - rect.top - pan.y) / scale;
@@ -372,6 +387,7 @@ export const Canvas: React.FC = () => {
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    if (e.altKey) return;
     const menuWidth = 190;
     const target = e.target as HTMLElement;
     const isElementClick = !!target.closest('.element-wrapper') || selectedIds.length > 0;
@@ -403,6 +419,13 @@ export const Canvas: React.FC = () => {
   };
 
   const handlePointerMove = useCallback((e: PointerEvent) => {
+    if (isResizingBrushRef.current) {
+      const deltaX = e.clientX - startResizeInfoRef.current.x;
+      const newWidth = Math.max(1, Math.min(100, Math.floor(startResizeInfoRef.current.width + deltaX * 0.2)));
+      setBrushWidth(newWidth);
+      return;
+    }
+
     if (brushCursorRef.current) {
       brushCursorRef.current.style.left = `${e.clientX}px`;
       brushCursorRef.current.style.top = `${e.clientY}px`;
@@ -436,9 +459,13 @@ export const Canvas: React.FC = () => {
     }
     if (selectionBox) { setSelectionBox(prev => prev ? { ...prev, x2: x, y2: y } : null); return; }
     if (connectingNode) { setMousePos({ x, y }); }
-  }, [connectingNode, scale, pan, isPanning, setPan, currentStroke, selectionBox, draggedGuide, updateGuide, isErasing, brushWidth, eraseBrushStrokesAt]);
+  }, [connectingNode, scale, pan, isPanning, setPan, currentStroke, selectionBox, draggedGuide, updateGuide, isErasing, brushWidth, setBrushWidth, eraseBrushStrokesAt]);
 
   const handlePointerUp = useCallback((e: PointerEvent) => {
+    if (isResizingBrushRef.current) {
+      isResizingBrushRef.current = false;
+      return;
+    }
     if (draggedGuide) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const relativeX = e.clientX - rect.left;
@@ -996,7 +1023,7 @@ export const Canvas: React.FC = () => {
             <input 
               type="range" 
               min="1" 
-              max="20" 
+              max="100" 
               value={brushWidth} 
               onChange={(e) => setBrushWidth(parseInt(e.target.value))} 
               style={{ width: '60px', cursor: 'pointer', height: '4px', background: 'var(--border-color)', borderRadius: '2px', outline: 'none' }}

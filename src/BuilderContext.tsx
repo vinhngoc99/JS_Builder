@@ -2095,7 +2095,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <div style="display:flex; align-items:center; gap:6px; padding:0 4px;">
           <span style="font-size:11px; color:var(--text-secondary); user-select:none;">Size:</span>
-          <input type="range" id="brush-width-slider" min="1" max="20" value="4" style="width:60px; cursor:pointer;" title="Brush Width">
+          <input type="range" id="brush-width-slider" min="1" max="100" value="4" style="width:60px; cursor:pointer;" title="Brush Width">
           <span id="brush-width-val" style="font-size:11px; color:var(--text-secondary); min-width:14px; text-align:right;">4</span>
         </div>
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
@@ -3072,6 +3072,24 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (!isInput && e.key.toLowerCase() === 'h' && !isInput) { e.preventDefault(); toggleToolbarVisibility(); }
             if (e.ctrlKey && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
             if (e.ctrlKey && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
+            if (e.ctrlKey && (e.key === '=' || e.key === '+') && !isInput) {
+              e.preventDefault();
+              const slider = document.getElementById('brush-width-slider');
+              if (slider) {
+                slider.value = Math.min(100, parseInt(slider.value) + 5) + '';
+                document.getElementById('brush-width-val').innerText = slider.value;
+                updateBrushCursor();
+              }
+            }
+            if (e.ctrlKey && e.key === '-' && !isInput) {
+              e.preventDefault();
+              const slider = document.getElementById('brush-width-slider');
+              if (slider) {
+                slider.value = Math.max(1, parseInt(slider.value) - 5) + '';
+                document.getElementById('brush-width-val').innerText = slider.value;
+                updateBrushCursor();
+              }
+            }
           };
           window.onkeyup = e => { if (e.code === 'Space') { isSpaceDown = false; isPanning = false; container.classList.remove('space-down', 'panning'); updateBrushCursor(); }};
 
@@ -3330,7 +3348,16 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             pan.x = mx - cx * ns; pan.y = my - cy * ns; scale = ns; updateTransform();
           };
 
+          let isResizingBrush = false;
+          let startResizeInfo = { x: 0, width: 0 };
+
           container.addEventListener('pointerdown', e => {
+            if (e.altKey && e.button === 2) {
+              isResizingBrush = true;
+              const slider = document.getElementById('brush-width-slider');
+              startResizeInfo = { x: e.clientX, width: parseFloat(slider ? slider.value : '4') };
+              return;
+            }
             if (isSpaceDown) { isPanning = true; container.classList.add('panning'); startPan = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }; return; }
             if (e.button === 2) {
               e.preventDefault();
@@ -3384,6 +3411,17 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           }, false);
 
           window.addEventListener('pointermove', e => {
+            if (isResizingBrush) {
+              const deltaX = e.clientX - startResizeInfo.x;
+              const newWidth = Math.max(1, Math.min(100, Math.floor(startResizeInfo.width + deltaX * 0.2)));
+              const slider = document.getElementById('brush-width-slider');
+              if (slider) {
+                slider.value = newWidth + '';
+                document.getElementById('brush-width-val').innerText = newWidth;
+                updateBrushCursor(e);
+              }
+              return;
+            }
             updateBrushCursor(e);
             if (isPanning) { pan.x = startPan.px + (e.clientX - startPan.x); pan.y = startPan.py + (e.clientY - startPan.y); updateTransform(); return; }
             if (isErasing) {
@@ -3459,6 +3497,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             isErasing = false;
             lastEraserPos = null;
             isPanning = false;
+            isResizingBrush = false;
             container.classList.remove('panning');
             if (activeDrag) {
               activeDrag.style.zIndex = activeDrag.classList.contains('is-node') ? 1 : 2;
