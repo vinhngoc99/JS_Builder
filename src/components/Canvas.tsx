@@ -311,7 +311,7 @@ export const Canvas: React.FC = () => {
       e.preventDefault();
       const el = canvasRef.current; if (!el) return;
       const delta = -e.deltaY * 0.001;
-      const newScale = Math.min(Math.max(0.1, scale * (1 + delta)), 5);
+      const newScale = Math.min(Math.max(0.05, scale * (1 + delta)), 20);
       const rect = el.getBoundingClientRect();
       const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
       const canvasX = (mouseX - pan.x) / scale, canvasY = (mouseY - pan.y) / scale;

@@ -179,8 +179,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         const scrollH = textContainer.scrollHeight;
         const borderWidth = (element as any).borderWidth || 0;
         const neededHeight = scrollH + 18 + (borderWidth * 2);
-        if (neededHeight > element.height) {
-          updateElement(element.id, { height: neededHeight });
+        if (neededHeight > element.height + 2) { // Add 2px tolerance to prevent infinite loop
+          updateElement(element.id, { height: Math.ceil(neededHeight) });
         }
       }
     }
@@ -1091,8 +1091,15 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
             />
           </button>
         );
-      case 'image':
+      case 'image': {
         const objPos = elAny.objectPosition || '50% 50%';
+        const displaySrc = (() => {
+          if (!element.src || !element.src.includes('lh3.googleusercontent.com')) return element.src;
+          const q = (element as any).imageQuality;
+          if (q === undefined) return element.src;
+          const baseSrc = element.src.replace(/=s\d+$/, '');
+          return q === 100 ? `${baseSrc}=s0` : `${baseSrc}=s${Math.round(40 * q)}`;
+        })();
         return (
           <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
             {elAny.title && <div className="media-header" style={{ fontSize: `${elAny.fontSize || 11}px` }}>{elAny.title}</div>}
@@ -1104,10 +1111,11 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
                   <div style={{ color: '#fff', fontSize: '10px', background: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px', position: 'absolute', bottom: '10px' }}>Drag to pan image</div>
                 </div>
               )}
-              <img src={element.src} alt={element.alt} style={{ width: '100%', height: '100%', objectFit: element.objectFit, objectPosition: objPos, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: `${element.stroke?.radius ?? 0}px`, boxSizing: 'border-box' }} draggable={false} />
+              <img src={displaySrc} alt={element.alt} style={{ width: '100%', height: '100%', objectFit: element.objectFit, objectPosition: objPos, borderWidth: `${element.stroke?.width ?? 0}px`, borderStyle: element.stroke?.style || 'solid', borderColor: getAdaptedBorderColor(element.stroke?.color || 'transparent'), borderRadius: `${element.stroke?.radius ?? 0}px`, boxSizing: 'border-box' }} draggable={false} loading="lazy" decoding="async" />
             </div>
           </div>
         );
+      }
       case 'video':
         return (
           <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>

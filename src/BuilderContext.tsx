@@ -1581,9 +1581,16 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
           case 'image': {
             const safeImgTitle = elAny.title ? escapeHtml(elAny.title) : '';
+            const exportSrc = (() => {
+              if (!el.src || !el.src.includes('lh3.googleusercontent.com')) return el.src;
+              const q = (el as any).imageQuality;
+              if (q === undefined) return el.src;
+              const baseSrc = el.src.replace(/=s\d+$/, '');
+              return q === 100 ? `${baseSrc}=s0` : `${baseSrc}=s${Math.round(40 * q)}`;
+            })();
             const safeAlt = escapeHtml(el.alt);
             const imgHeader = safeImgTitle ? `<div style="padding: 6px 12px; background-color: var(--panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; font-size: ${elAny.fontSize || 11}px; font-weight: 700; color: var(--text-secondary); width: 100%; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;">${safeImgTitle}</div>` : '';
-            innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative; overflow: hidden;"><img id="el-${el.id}" src="${escapeHtml(el.src)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; ${getExportStrokeCSS(rawEl.stroke)} box-sizing: border-box; pointer-events: none;" draggable="false" /></div></div>`;
+            innerContent = `<div style="width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;">${imgHeader}<div style="flex: 1; position: relative; overflow: hidden;"><img id="el-${el.id}" src="${escapeHtml(exportSrc)}" alt="${safeAlt}" style="width: 100%; height: 100%; object-fit: ${el.objectFit}; object-position: ${elAny.objectPosition || '50% 50%'}; ${getExportStrokeCSS(rawEl.stroke)} box-sizing: border-box; pointer-events: none;" draggable="false" loading="lazy" decoding="async" /></div></div>`;
             break;
           }
           case 'video': {
@@ -3342,7 +3349,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
 
           container.onwheel = e => {
-            e.preventDefault(); const delta = -e.deltaY * 0.001; const ns = Math.min(Math.max(0.1, scale * (1 + delta)), 5);
+            e.preventDefault(); const delta = -e.deltaY * 0.001; const ns = Math.min(Math.max(0.05, scale * (1 + delta)), 20);
             const r = container.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top;
             const cx = (mx - pan.x) / scale, cy = (my - pan.y) / scale;
             pan.x = mx - cx * ns; pan.y = my - cy * ns; scale = ns; updateTransform();

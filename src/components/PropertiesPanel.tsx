@@ -114,6 +114,39 @@ const compressImageFile = (file: File): Promise<{ src: string; width: number; he
   reader.readAsDataURL(file);
 });
 
+
+const NumberInput = ({ label, value, onChange, min, max, disabled, style }: any) => {
+  const [localValue, setLocalValue] = React.useState(String(Math.round(value)));
+  React.useEffect(() => { setLocalValue(String(Math.round(value))); }, [value]);
+  
+  return (
+    <div>
+      {label && <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>{label}</div>}
+      <input 
+        type="number" 
+        value={localValue} 
+        onChange={(e) => {
+          setLocalValue(e.target.value);
+          const parsed = parseFloat(e.target.value);
+          if (!isNaN(parsed)) onChange(parsed);
+        }}
+        onBlur={() => {
+          let parsed = parseFloat(localValue);
+          if (isNaN(parsed)) parsed = 0;
+          if (min !== undefined) parsed = Math.max(min, parsed);
+          if (max !== undefined) parsed = Math.min(max, parsed);
+          setLocalValue(String(parsed));
+          onChange(parsed);
+        }}
+        disabled={disabled}
+        min={min}
+        max={max}
+        style={style}
+      />
+    </div>
+  );
+};
+
 export const PropertiesPanel: React.FC = () => {
   const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory, saveHistoryOnce, showAlert } = useBuilder();
 
@@ -696,18 +729,17 @@ export const PropertiesPanel: React.FC = () => {
               style={{ width: '100%' }}
             />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', marginTop: '4px' }}>
-              <div><div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>X</div><input type="number" value={Math.round(selectedElement!.x)} onChange={(e) => handlePanelChange({ x: parseFloat(e.target.value) || 0 })} disabled={!!selectedElement!.fillParent} /></div>
-              <div><div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>Y</div><input type="number" value={Math.round(selectedElement!.y)} onChange={(e) => handlePanelChange({ y: parseFloat(e.target.value) || 0 })} disabled={!!selectedElement!.fillParent} /></div>
-              <div><div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>W</div><input type="number" value={Math.round(selectedElement!.width)} onChange={(e) => handlePanelChange({ width: Math.max(10, parseFloat(e.target.value) || 10) })} disabled={!!selectedElement!.fillParent} min={10} /></div>
-              <div><div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>H</div><input type="number" value={Math.round(selectedElement!.height)} onChange={(e) => handlePanelChange({ height: Math.max(10, parseFloat(e.target.value) || 10) })} disabled={!!selectedElement!.fillParent} min={10} /></div>
+              <NumberInput label="X" value={selectedElement!.x} onChange={(v) => handlePanelChange({ x: v })} disabled={!!selectedElement!.fillParent} style={{ width: '100%', boxSizing: 'border-box', padding: '4px 2px', textAlign: 'center' }} />
+              <NumberInput label="Y" value={selectedElement!.y} onChange={(v) => handlePanelChange({ y: v })} disabled={!!selectedElement!.fillParent} style={{ width: '100%', boxSizing: 'border-box', padding: '4px 2px', textAlign: 'center' }} />
+              <NumberInput label="W" value={selectedElement!.width} onChange={(v) => handlePanelChange({ width: v })} disabled={!!selectedElement!.fillParent} min={10} style={{ width: '100%', boxSizing: 'border-box', padding: '4px 2px', textAlign: 'center' }} />
+              <NumberInput label="H" value={selectedElement!.height} onChange={(v) => handlePanelChange({ height: v })} disabled={!!selectedElement!.fillParent} min={10} style={{ width: '100%', boxSizing: 'border-box', padding: '4px 2px', textAlign: 'center' }} />
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
               <div style={{ fontSize: '11px', color: '#8c8d9c', width: '50px' }}>Rotation</div>
-              <input 
-                type="number" 
+              <NumberInput 
                 value={selectedElement!.rotation || 0} 
-                onChange={(e) => handlePanelChange({ rotation: parseInt(e.target.value) || 0 })} 
-                style={{ flex: 1 }}
+                onChange={(v) => handlePanelChange({ rotation: v })} 
+                style={{ flex: 1, padding: '4px' }}
               />
               <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>°</span>
             </div>
@@ -947,6 +979,29 @@ export const PropertiesPanel: React.FC = () => {
                 style={{ width: '100%' }}
                 placeholder="https://..."
               />
+              {selectedElement!.type === 'image' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                  <Toggle 
+                    label="Custom Quality" 
+                    checked={(selectedElement! as any).imageQuality !== undefined} 
+                    onChange={(v) => handlePanelChange({ imageQuality: v ? 100 : undefined })} 
+                    color="#4caf50" 
+                  />
+                  {(selectedElement! as any).imageQuality !== undefined && (
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ fontSize: '11px', color: '#8c8d9c', width: '70px' }}>Quality</div>
+                      <NumberInput 
+                        value={(selectedElement! as any).imageQuality} 
+                        onChange={(v: number) => handlePanelChange({ imageQuality: Math.max(1, Math.min(100, v)) })} 
+                        style={{ flex: 1, padding: '4px' }}
+                        min={1}
+                        max={100}
+                      />
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>%</span>
+                    </div>
+                  )}
+                </div>
+              )}
               {selectedElement!.type === 'image' && (
                 <>
                   <input
