@@ -1387,21 +1387,21 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
       onPointerDown={handlePointerDown}
       onDoubleClick={(e) => {
         if (isPresenting) return;
-        if (['text', 'button', 'shape'].includes(element.type)) {
+        if (['text', 'button', 'shape', 'node'].includes(element.type)) {
           e.stopPropagation();
           setIsEditingText(true);
         }
       }}
     >
-      {element.type === 'node' && (
+      {element.type === 'node' && (isEditingText || (element.name && element.name.trim() !== '')) && (
         <div className="element-header" style={{ fontFamily: element.fontFamily, fontSize: `${elAny.fontSize || 14}px` }}>
           <Settings size={16} color="#8c8d9c" />
           {isEditingText ? (
             <input
               type="text"
-              value={element.title || ''}
+              value={element.name || ''}
               autoFocus
-              onChange={(e) => updateElement(element.id, { title: e.target.value })}
+              onChange={(e) => updateElement(element.id, { name: e.target.value })}
               onBlur={() => setIsEditingText(false)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -1423,9 +1423,9 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
           ) : (
             <span 
               style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: getAdaptedTextColor(element.color) }}
-              onDoubleClick={() => setIsEditingText(true)}
+              onDoubleClick={(e) => { e.stopPropagation(); setIsEditingText(true); }}
             >
-              {element.title || 'NODE'}
+              {element.name}
             </span>
           )}
         </div>

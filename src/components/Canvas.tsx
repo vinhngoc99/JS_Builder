@@ -255,7 +255,7 @@ export const Canvas: React.FC = () => {
         if (selectedIds.length > 0) removeSelected();
         else if (selectedConnectionId) removeConnection(selectedConnectionId);
       }
-      if (e.ctrlKey && e.key === 'd' && !isInput) { e.preventDefault(); duplicateSelected(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd' && !isInput) { e.preventDefault(); duplicateSelected(); }
       if (e.key.toLowerCase() === 'b' && !isInput) {
         e.preventDefault();
         if (isBrushMode && brushTool === 'draw') {
@@ -280,22 +280,22 @@ export const Canvas: React.FC = () => {
       }
       
       // Select All, Copy, Paste
-      if (e.ctrlKey && e.key === 'a' && !isInput) { e.preventDefault(); selectAll(); }
-      if (e.ctrlKey && e.key === 'c' && !isInput) { e.preventDefault(); copySelected(); }
-      if (e.ctrlKey && e.key === 'v' && !isInput) { e.preventDefault(); pasteCopied(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !isInput) { e.preventDefault(); selectAll(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !isInput) { e.preventDefault(); copySelected(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !isInput) { e.preventDefault(); pasteCopied(); }
 
       // Undo / Redo
-      if (e.ctrlKey && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
-      if (e.ctrlKey && e.shiftKey && e.key === 'Z' && !isInput) { e.preventDefault(); redo(); } // some browsers
-      if (e.ctrlKey && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Z' && !isInput) { e.preventDefault(); redo(); } // some browsers
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
 
       // Zoom to Fit
-      if (e.ctrlKey && e.key === '0' && !isInput) { e.preventDefault(); zoomToFit(); }
-      if (e.ctrlKey && (e.key === '=' || e.key === '+') && !isInput) {
+      if ((e.ctrlKey || e.metaKey) && e.key === '0' && !isInput) { e.preventDefault(); zoomToFit(); }
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+') && !isInput) {
         e.preventDefault();
         setBrushWidth(Math.min(100, brushWidth + 5));
       }
-      if (e.ctrlKey && e.key === '-' && !isInput) {
+      if ((e.ctrlKey || e.metaKey) && e.key === '-' && !isInput) {
         e.preventDefault();
         setBrushWidth(Math.max(1, brushWidth - 5));
       }
@@ -731,7 +731,7 @@ export const Canvas: React.FC = () => {
           }}
         >
           
-          <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute', pointerEvents: isBrushMode ? 'none' : 'auto' }}>
+          <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute', pointerEvents: 'none' }}>
             <defs>
             </defs>
             {connections.map(conn => {
@@ -811,7 +811,7 @@ export const Canvas: React.FC = () => {
                   className={`connection-group ${selectedConnectionId === conn.id ? 'selected' : ''}`} 
                   style={{ 
                     opacity: isConnHidden ? (isPresenting ? 0 : 0.4) : 1, 
-                    pointerEvents: isConnHidden ? 'none' : 'auto',
+                    pointerEvents: (isConnHidden || isBrushMode) ? 'none' : 'auto',
                     transition: 'opacity 0.4s ease'
                   }}
                   onPointerDown={(e) => { e.stopPropagation(); selectConnection(conn.id); }}
@@ -1015,8 +1015,8 @@ export const Canvas: React.FC = () => {
           </button>
           <button className="btn" onClick={clearBrush} title="Clear All Drawings (X)"><Trash2 size={18} /></button>
           <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 5px' }} />
-          <button className="btn" onClick={undo} title="Undo (Ctrl+Z)"><RotateCcw size={18} /></button>
-          <button className="btn" onClick={redo} title="Redo (Ctrl+Shift+Z)"><RotateCw size={18} /></button>
+          <button className="btn" onClick={undo} title="Undo (Ctrl/⌘+Z)"><RotateCcw size={18} /></button>
+          <button className="btn" onClick={redo} title="Redo (Ctrl/⌘+Shift+Z)"><RotateCw size={18} /></button>
           <div style={{ width: '1px', background: 'var(--border-color)', margin: '0 5px' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-secondary)', userSelect: 'none' }}>Size:</span>
@@ -1060,7 +1060,7 @@ export const Canvas: React.FC = () => {
       {!isPresenting && (
         <div className="zoom-controls">
           <span>{Math.round(scale * 100)}%</span>
-          <button onClick={zoomToFit} className="btn-fit" title="Fit in view (Ctrl+0)">Fit</button>
+          <button onClick={zoomToFit} className="btn-fit" title="Fit in view (Ctrl/⌘+0)">Fit</button>
         </div>
       )}
 
@@ -1227,11 +1227,11 @@ export const Canvas: React.FC = () => {
               <div className="shortcut-section">
                 <h3>General Editing</h3>
                 <div className="shortcut-grid">
-                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>V</kbd></span><span className="shortcut-desc">Copy / Paste selected</span></div>
-                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>D</kbd></span><span className="shortcut-desc">Duplicate selected</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl/⌘</kbd> + <kbd>C</kbd> / <kbd>V</kbd></span><span className="shortcut-desc">Copy / Paste selected</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl/⌘</kbd> + <kbd>D</kbd></span><span className="shortcut-desc">Duplicate selected</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>Delete</kbd> / <kbd>Backspace</kbd></span><span className="shortcut-desc">Delete selected element / connection</span></div>
-                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>A</kbd></span><span className="shortcut-desc">Select all elements</span></div>
-                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Y</kbd></span><span className="shortcut-desc">Undo / Redo</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl/⌘</kbd> + <kbd>A</kbd></span><span className="shortcut-desc">Select all elements</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl/⌘</kbd> + <kbd>Z</kbd> / <kbd>Y</kbd></span><span className="shortcut-desc">Undo / Redo</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>Shift</kbd> + Drag</span><span className="shortcut-desc">Lock drag axis (horizontal/vertical)</span></div>
                 </div>
               </div>
@@ -1243,7 +1243,7 @@ export const Canvas: React.FC = () => {
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>X</kbd></span><span className="shortcut-desc">Clear all drawings</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>Space</kbd> + Drag</span><span className="shortcut-desc">Pan canvas</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>Scroll Wheel</kbd></span><span className="shortcut-desc">Zoom in / out</span></div>
-                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>0</kbd></span><span className="shortcut-desc">Fit in view</span></div>
+                  <div className="shortcut-row"><span className="shortcut-keys"><kbd>Ctrl/⌘</kbd> + <kbd>0</kbd></span><span className="shortcut-desc">Fit in view</span></div>
                   <div className="shortcut-row"><span className="shortcut-keys"><kbd>H</kbd> / <kbd>?</kbd></span><span className="shortcut-desc">Toggle this Help shortcuts menu</span></div>
                 </div>
               </div>

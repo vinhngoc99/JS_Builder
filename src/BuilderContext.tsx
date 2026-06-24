@@ -231,6 +231,7 @@ interface BuilderContextType {
   deleteVariant: (id: string) => void;
   renameVariant: (id: string, name: string) => void;
   importHTML: (htmlText: string) => boolean;
+  importCodeAndMerge: (code: string) => boolean;
   showAlert: (message: string, title?: string) => Promise<void>;
   showConfirm: (message: string, title?: string) => Promise<boolean>;
   
@@ -472,7 +473,18 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, []);
 
   const copySelected = useCallback(() => {
-    const selected = elementsRef.current.filter(el => selectedIds.includes(el.id));
+    const toCopy = new Set(selectedIds);
+    let added = true;
+    while (added) {
+      added = false;
+      elementsRef.current.forEach(el => {
+        if (el.parentId && toCopy.has(el.parentId) && !toCopy.has(el.id)) {
+          toCopy.add(el.id);
+          added = true;
+        }
+      });
+    }
+    const selected = elementsRef.current.filter(el => toCopy.has(el.id));
     if (selected.length > 0) {
       setCopiedElements(structuredClone(selected));
     }
@@ -796,6 +808,75 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   };
 
+  const importCodeAndMerge = (code: string): boolean => {
+    try {
+      let state: any;
+      const match = code.match(/<script id="js-builder-state" type="application\/json">([\s\S]*?)<\/script>/);
+      if (match && match[1]) {
+        state = JSON.parse(match[1]);
+      } else {
+        state = JSON.parse(code);
+      }
+
+      let importedElements: CanvasElement[] = [];
+      let importedConnections: Connection[] = [];
+
+      if (state.variants && state.activeVariantId) {
+        const active = state.variants.find((v: any) => v.id === state.activeVariantId) || state.variants[0];
+        if (active) {
+          importedElements = active.elements || [];
+          importedConnections = active.connections || [];
+        }
+      } else if (state.elements) {
+        importedElements = state.elements || [];
+        importedConnections = state.connections || [];
+      } else {
+        return false;
+      }
+
+      importedElements = migrateElements(importedElements);
+      importedConnections = migrateConnections(importedConnections);
+
+      saveHistory();
+
+      const idMap = new Map<string, string>();
+      importedElements.forEach(el => idMap.set(el.id, uuidv4()));
+
+      const newElements = importedElements.map(el => {
+        let newParentId = el.parentId;
+        if (newParentId && idMap.has(newParentId)) {
+          newParentId = idMap.get(newParentId)!;
+        } else if (newParentId) {
+          newParentId = null;
+        }
+        
+        return {
+          ...el,
+          id: idMap.get(el.id)!,
+          parentId: newParentId,
+          x: newParentId ? el.x : el.x + 50,
+          y: newParentId ? el.y : el.y + 50,
+        };
+      }) as CanvasElement[];
+
+      const newConnections = importedConnections.map(conn => ({
+        ...conn,
+        id: uuidv4(),
+        fromId: idMap.get(conn.fromId) || conn.fromId,
+        toId: idMap.get(conn.toId) || conn.toId,
+      })) as Connection[];
+
+      setElements(prev => [...prev, ...newElements]);
+      setConnections(prev => [...prev, ...newConnections]);
+      setSelectedIds(newElements.map(el => el.id));
+
+      return true;
+    } catch (e) {
+      console.error("Failed to import code and merge", e);
+      return false;
+    }
+  };
+
   const addElement = (type: ElementType, pos?: { x: number, y: number }, additionalProps?: Partial<CanvasElement>) => {
     saveHistory();
     const id = uuidv4();
@@ -1041,15 +1122,22 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   const updateConnection = (id: string, updates: Partial<Connection>) => {
     setConnections(prev => prev.map(c => c.id === id ? { ...c, ...updates } as Connection : c));
   };
-
   const removeElement = (id: string) => {
     saveHistory();
     const toDelete = new Set([id]);
-    elementsRef.current.forEach(el => {
-      if (el.parentId === id) toDelete.add(el.id);
-    });
+    let added = true;
+    while (added) {
+      added = false;
+      elementsRef.current.forEach(el => {
+        if (el.parentId && toDelete.has(el.parentId) && !toDelete.has(el.id)) {
+          toDelete.add(el.id);
+          added = true;
+        }
+      });
+    }
     setElements(prev => prev.filter(el => !toDelete.has(el.id)));
     setConnections(prev => prev.filter(c => !toDelete.has(c.fromId) && !toDelete.has(c.toId)));
+    setBrushStrokes(prev => prev.filter(stroke => !stroke.attachedNodeId || !toDelete.has(stroke.attachedNodeId)));
     setSelectedIds(prev => prev.filter(sid => !toDelete.has(sid)));
   };
 
@@ -1063,19 +1151,73 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     setConnections(prev => prev.filter(c => !toDelete.has(c.fromId) && !toDelete.has(c.toId)));
     setSelectedIds([]);
   };
-
   const duplicateSelected = () => {
     saveHistory();
+    const toDuplicate = new Set(selectedIds);
+    let added = true;
+    while (added) {
+      added = false;
+      elementsRef.current.forEach(el => {
+        if (el.parentId && toDuplicate.has(el.parentId) && !toDuplicate.has(el.id)) {
+          toDuplicate.add(el.id);
+          added = true;
+        }
+      });
+    }
+
+    const idMap = new Map<string, string>();
+    toDuplicate.forEach(id => idMap.set(id, uuidv4()));
+
     const newElements: CanvasElement[] = [];
-    selectedIds.forEach(id => {
+    toDuplicate.forEach(id => {
       const el = elementsRef.current.find(e => e.id === id);
       if (!el) return;
-      const newId = uuidv4();
-      newElements.push({ ...el, id: newId, x: el.x + 40, y: el.y + 40 } as CanvasElement);
+      
+      let newParentId = el.parentId;
+      if (el.parentId && idMap.has(el.parentId)) {
+        newParentId = idMap.get(el.parentId)!;
+      }
+      
+      const isTopLevel = !el.parentId || !toDuplicate.has(el.parentId);
+      const offsetX = isTopLevel ? 40 : 0;
+      const offsetY = isTopLevel ? 40 : 0;
+
+      newElements.push({ 
+        ...el, 
+        id: idMap.get(el.id)!, 
+        parentId: newParentId,
+        x: el.x + offsetX, 
+        y: el.y + offsetY,
+        animations: (el.animations || []).map(anim => ({ ...anim, id: uuidv4() }))
+      } as CanvasElement);
     });
+
+    const clonedConnections = connectionsRef.current
+      .filter(conn => toDuplicate.has(conn.fromId) && toDuplicate.has(conn.toId))
+      .map(conn => ({
+        ...structuredClone(conn),
+        id: uuidv4(),
+        fromId: idMap.get(conn.fromId)!,
+        toId: idMap.get(conn.toId)!,
+      }));
+
+    const clonedBrushStrokes = brushStrokesRef.current
+      .filter(stroke => stroke.attachedNodeId && toDuplicate.has(stroke.attachedNodeId))
+      .map(stroke => ({
+        ...structuredClone(stroke),
+        id: uuidv4(),
+        attachedNodeId: idMap.get(stroke.attachedNodeId!),
+        points: stroke.points.map(point => ({ ...point })),
+      }));
+
     if (newElements.length > 0) {
       setElements(prev => [...prev, ...newElements]);
-      setSelectedIds(newElements.map(e => e.id));
+      setConnections(prev => [...prev, ...clonedConnections]);
+      setBrushStrokes(prev => [...prev, ...clonedBrushStrokes]);
+      
+      const newSelectedIds = selectedIds.map(id => idMap.get(id)).filter(Boolean) as string[];
+      setSelectedIds(newSelectedIds);
+      setSelectedConnectionId(null);
     }
   };
 
@@ -2097,8 +2239,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <button id="eraser-toggle" class="btn-tool" title="Eraser (E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.9-9.9c1-1 2.5-1 3.4 0l4.3 4.3c1 1 1 2.5 0 3.4L10.5 21c-1 1-2.5 1-3.4 0Z"/><path d="m11 6 4 4"/></svg></button>
         <button id="brush-clear" class="btn-tool" title="Clear (X)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
-        <button id="undo-btn" class="btn-tool" title="Undo (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
-        <button id="redo-btn" class="btn-tool" title="Redo (Ctrl+Y)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+        <button id="undo-btn" class="btn-tool" title="Undo (Ctrl/⌘+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+        <button id="redo-btn" class="btn-tool" title="Redo (Ctrl/⌘+Y)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <div style="display:flex; align-items:center; gap:6px; padding:0 4px;">
           <span style="font-size:11px; color:var(--text-secondary); user-select:none;">Size:</span>
@@ -2125,7 +2267,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         <div style="padding: 10px 12px; border-bottom: 1px solid var(--border-color); font-size: 12px; font-weight: 700; display: flex; justify-content: space-between; align-items: center;"><span>Speaker Notes</span><button onclick="toggleSpeakerNotes(false)" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px;">&times;</button></div>
         <pre id="speaker-notes-text" style="white-space: pre-wrap; margin: 0; padding: 12px; font-family: inherit; font-size: 13px; line-height: 1.45; color: var(--text-secondary);"></pre>
       </div>
-      <div class="zoom-controls"><span id="zoom-percent" style="font-weight:700; min-width: 36px; text-align: center; font-size: 12px;">100%</span><button class="btn-fit" id="zoom-fit" style="margin-right: 5px;" title="Fit in view (Ctrl+0)">Fit</button><button class="btn-fit" id="reset-layout" style="background: #e91e63; box-shadow: 0 4px 12px rgba(233, 30, 99, 0.3);">Reset</button></div>
+      <div class="zoom-controls"><span id="zoom-percent" style="font-weight:700; min-width: 36px; text-align: center; font-size: 12px;">100%</span><button class="btn-fit" id="zoom-fit" style="margin-right: 5px;" title="Fit in view (Ctrl/⌘+0)">Fit</button><button class="btn-fit" id="reset-layout" style="background: #e91e63; box-shadow: 0 4px 12px rgba(233, 30, 99, 0.3);">Reset</button></div>
       <div id="notification-toast" class="notification-toast"><div class="notification-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><span id="notification-text"></span></div>
       
       <!-- Exported Laser Pointer Elements -->
@@ -3069,7 +3211,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             }
             if (e.key.toLowerCase() === 'x' && !isInput) clearBrush();
             // Ctrl + 0 shortcut for fit in view
-            if (e.ctrlKey && e.key === '0') {
+            if ((e.ctrlKey || e.metaKey) && e.key === '0') {
               e.preventDefault();
               const zoomFitBtn = document.getElementById('zoom-fit');
               if (zoomFitBtn) zoomFitBtn.click();
@@ -3077,9 +3219,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             }
 
             if (!isInput && e.key.toLowerCase() === 'h' && !isInput) { e.preventDefault(); toggleToolbarVisibility(); }
-            if (e.ctrlKey && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
-            if (e.ctrlKey && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
-            if (e.ctrlKey && (e.key === '=' || e.key === '+') && !isInput) {
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z' && !isInput) { e.preventDefault(); undo(); }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'y' && !isInput) { e.preventDefault(); redo(); }
+            if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+') && !isInput) {
               e.preventDefault();
               const slider = document.getElementById('brush-width-slider');
               if (slider) {
@@ -3088,7 +3230,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 updateBrushCursor();
               }
             }
-            if (e.ctrlKey && e.key === '-' && !isInput) {
+            if ((e.ctrlKey || e.metaKey) && e.key === '-' && !isInput) {
               e.preventDefault();
               const slider = document.getElementById('brush-width-slider');
               if (slider) {
@@ -3917,7 +4059,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       previewAnimationId, setPreviewAnimationId,
       isHelpOpen, setIsHelpOpen,
       isPropertiesOpen, setIsPropertiesOpen,
-      variants, activeVariantId, switchVariant, addVariant, deleteVariant, renameVariant, importHTML,
+      variants, activeVariantId, switchVariant, addVariant, deleteVariant, renameVariant, importHTML, importCodeAndMerge,
       showAlert, showConfirm,
       bringToFront, sendToBack, bringForward, sendBackward, reorderElements,
       groupElements, ungroupElements,

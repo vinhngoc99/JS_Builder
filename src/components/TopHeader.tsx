@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Upload, Download, Play, Eye, X, Edit3 } from 'lucide-react';
+import { Plus, Upload, Download, Play, Eye, X, Edit3, Code } from 'lucide-react';
 import { useBuilder } from '../BuilderContext';
 import { createPortal } from 'react-dom';
 
@@ -12,6 +12,7 @@ export const TopHeader: React.FC = () => {
     deleteVariant,
     renameVariant,
     importHTML,
+    importCodeAndMerge,
     exportHTML,
     setIsPresenting,
     showConfirm
@@ -20,6 +21,8 @@ export const TopHeader: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [importCodeModalOpen, setImportCodeModalOpen] = useState(false);
+  const [importCodeValue, setImportCodeValue] = useState('');
   const [previewMode, setPreviewMode] = useState(false);
   const [htmlCode, setHtmlCode] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
@@ -92,6 +95,18 @@ export const TopHeader: React.FC = () => {
     };
     reader.readAsText(file);
     e.target.value = ''; // Reset file input
+  };
+
+  const handleImportCodeSubmit = () => {
+    if (!importCodeValue.trim()) return;
+    const success = importCodeAndMerge(importCodeValue);
+    if (success) {
+      showToast('Code imported and merged successfully!', 'success');
+      setImportCodeModalOpen(false);
+      setImportCodeValue('');
+    } else {
+      showToast('Failed to import code. Invalid format.', 'error');
+    }
   };
 
   const handleExportClick = () => {
@@ -228,6 +243,11 @@ export const TopHeader: React.FC = () => {
       </div>
 
       <div className="header-right">
+        <button className="header-action-btn" onClick={() => setImportCodeModalOpen(true)} title="Import by Code">
+          <Code size={16} />
+          <span>Import Code</span>
+        </button>
+        
         <button className="header-action-btn" onClick={handleImportClick} title="Import HTML">
           <Upload size={16} />
           <span>Import</span>
@@ -280,6 +300,45 @@ export const TopHeader: React.FC = () => {
           </div>
           <span className="toast-message">{toastMessage}</span>
         </div>
+      )}
+
+      {/* Import Code Modal */}
+      {importCodeModalOpen && createPortal(
+        <div className="editor-modal-overlay">
+          <div className="editor-modal-container">
+            <div className="editor-modal-header">
+              <span className="modal-title">Import by Code</span>
+              <div className="modal-actions">
+                <button className="modal-btn close" onClick={() => setImportCodeModalOpen(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="editor-modal-body">
+              <div className="modal-export-content">
+                <p className="modal-desc">
+                  Paste the JSON or HTML code exported from this builder to merge it into the current canvas.
+                </p>
+                <textarea
+                  value={importCodeValue}
+                  onChange={(e) => setImportCodeValue(e.target.value)}
+                  className="modal-code-area"
+                  placeholder="Paste code here..."
+                />
+                <div className="modal-buttons-row">
+                  <button className="modal-btn secondary" onClick={() => setImportCodeModalOpen(false)}>
+                    Cancel
+                  </button>
+                  <button className="modal-btn primary" onClick={handleImportCodeSubmit}>
+                    Merge Code
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* Export & Preview Modal */}

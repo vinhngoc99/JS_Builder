@@ -77,8 +77,15 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
           <div style={{ fontSize: '11px', color: '#8c8d9c', marginBottom: '4px', fontWeight: 600 }}>Size</div>
           <input
             type="number"
-            value={text.fontSize}
-            onChange={(e) => handlePropertyChange('fontSize', Math.max(6, parseInt(e.target.value) || 12))}
+            value={text.fontSize === '' ? '' : text.fontSize}
+            onChange={(e) => {
+              const val = e.target.value;
+              handlePropertyChange('fontSize', val === '' ? '' : parseInt(val));
+            }}
+            onBlur={(e) => {
+              const val = parseInt(e.target.value);
+              handlePropertyChange('fontSize', isNaN(val) || val < 6 ? 12 : val);
+            }}
             style={{ width: '100%' }}
             min={6}
           />
@@ -189,8 +196,15 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
           <div style={{ fontSize: '10px', color: '#8c8d9c', marginBottom: '2px' }}>Line Height</div>
           <input
             type="number"
-            value={text.lineHeight}
-            onChange={(e) => handlePropertyChange('lineHeight', parseFloat(e.target.value) || 1.2)}
+            value={text.lineHeight === '' ? '' : text.lineHeight}
+            onChange={(e) => {
+              const val = e.target.value;
+              handlePropertyChange('lineHeight', val === '' ? '' : parseFloat(val));
+            }}
+            onBlur={(e) => {
+              const val = parseFloat(e.target.value);
+              handlePropertyChange('lineHeight', isNaN(val) ? 1.5 : val);
+            }}
             step="0.1"
             min="0.5"
             max="3"
@@ -201,8 +215,15 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
           <div style={{ fontSize: '10px', color: '#8c8d9c', marginBottom: '2px' }}>Letter Spacing</div>
           <input
             type="number"
-            value={text.letterSpacing}
-            onChange={(e) => handlePropertyChange('letterSpacing', parseFloat(e.target.value) || 0)}
+            value={text.letterSpacing === '' ? '' : text.letterSpacing}
+            onChange={(e) => {
+              const val = e.target.value;
+              handlePropertyChange('letterSpacing', val === '' ? '' : parseFloat(val));
+            }}
+            onBlur={(e) => {
+              const val = parseFloat(e.target.value);
+              handlePropertyChange('letterSpacing', isNaN(val) ? 0 : val);
+            }}
             step="0.5"
             style={{ width: '100%' }}
           />
@@ -218,8 +239,15 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
               <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>{label}</div>
               <input
                 type="number"
-                value={text.padding?.[side] ?? 0}
-                onChange={(e) => handlePaddingChange(side, Math.max(0, parseInt(e.target.value) || 0))}
+                value={text.padding?.[side] === '' ? '' : (text.padding?.[side] ?? 0)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  handlePaddingChange(side, val === '' ? '' as any : parseInt(val));
+                }}
+                onBlur={(e) => {
+                  const val = parseInt(e.target.value);
+                  handlePaddingChange(side, isNaN(val) || val < 0 ? 0 : val);
+                }}
                 style={{ width: '100%', textAlign: 'center', padding: '4px' }}
                 min={0}
               />
