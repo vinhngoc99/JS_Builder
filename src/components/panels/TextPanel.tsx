@@ -45,6 +45,12 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
     });
   };
 
+  const parseFiniteNumber = (value: string): number | null => {
+    if (value.trim() === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
   const fontOptions = (
     <>
       <option value="sans-serif">Sans-Serif</option>
@@ -77,14 +83,14 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
           <div style={{ fontSize: '11px', color: '#8c8d9c', marginBottom: '4px', fontWeight: 600 }}>Size</div>
           <input
             type="number"
-            value={text.fontSize === '' ? '' : text.fontSize}
+            value={text.fontSize}
             onChange={(e) => {
-              const val = e.target.value;
-              handlePropertyChange('fontSize', val === '' ? '' : parseInt(val));
+              const val = parseFiniteNumber(e.target.value);
+              if (val !== null) handlePropertyChange('fontSize', Math.round(val));
             }}
             onBlur={(e) => {
-              const val = parseInt(e.target.value);
-              handlePropertyChange('fontSize', isNaN(val) || val < 6 ? 12 : val);
+              const val = parseFiniteNumber(e.target.value);
+              handlePropertyChange('fontSize', val === null || val < 6 ? 12 : Math.round(val));
             }}
             style={{ width: '100%' }}
             min={6}
@@ -196,14 +202,14 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
           <div style={{ fontSize: '10px', color: '#8c8d9c', marginBottom: '2px' }}>Line Height</div>
           <input
             type="number"
-            value={text.lineHeight === '' ? '' : text.lineHeight}
+            value={text.lineHeight}
             onChange={(e) => {
-              const val = e.target.value;
-              handlePropertyChange('lineHeight', val === '' ? '' : parseFloat(val));
+              const val = parseFiniteNumber(e.target.value);
+              if (val !== null) handlePropertyChange('lineHeight', val);
             }}
             onBlur={(e) => {
-              const val = parseFloat(e.target.value);
-              handlePropertyChange('lineHeight', isNaN(val) ? 1.5 : val);
+              const val = parseFiniteNumber(e.target.value);
+              handlePropertyChange('lineHeight', val === null ? 1.5 : val);
             }}
             step="0.1"
             min="0.5"
@@ -215,14 +221,14 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
           <div style={{ fontSize: '10px', color: '#8c8d9c', marginBottom: '2px' }}>Letter Spacing</div>
           <input
             type="number"
-            value={text.letterSpacing === '' ? '' : text.letterSpacing}
+            value={text.letterSpacing}
             onChange={(e) => {
-              const val = e.target.value;
-              handlePropertyChange('letterSpacing', val === '' ? '' : parseFloat(val));
+              const val = parseFiniteNumber(e.target.value);
+              if (val !== null) handlePropertyChange('letterSpacing', val);
             }}
             onBlur={(e) => {
-              const val = parseFloat(e.target.value);
-              handlePropertyChange('letterSpacing', isNaN(val) ? 0 : val);
+              const val = parseFiniteNumber(e.target.value);
+              handlePropertyChange('letterSpacing', val === null ? 0 : val);
             }}
             step="0.5"
             style={{ width: '100%' }}
@@ -239,14 +245,14 @@ export const TextPanel: React.FC<TextPanelProps> = ({ element, onChange }) => {
               <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginBottom: '2px', textAlign: 'center' }}>{label}</div>
               <input
                 type="number"
-                value={text.padding?.[side] === '' ? '' : (text.padding?.[side] ?? 0)}
+                value={text.padding?.[side] ?? 0}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  handlePaddingChange(side, val === '' ? '' as any : parseInt(val));
+                  const val = parseFiniteNumber(e.target.value);
+                  if (val !== null) handlePaddingChange(side, Math.round(val));
                 }}
                 onBlur={(e) => {
-                  const val = parseInt(e.target.value);
-                  handlePaddingChange(side, isNaN(val) || val < 0 ? 0 : val);
+                  const val = parseFiniteNumber(e.target.value);
+                  handlePaddingChange(side, val === null || val < 0 ? 0 : Math.round(val));
                 }}
                 style={{ width: '100%', textAlign: 'center', padding: '4px' }}
                 min={0}

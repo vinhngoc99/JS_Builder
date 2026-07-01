@@ -30,6 +30,15 @@ export const TopHeader: React.FC = () => {
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!modalOpen || !previewMode || !htmlCode) {
@@ -47,10 +56,14 @@ export const TopHeader: React.FC = () => {
   }, [htmlCode, modalOpen, previewMode]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     setToastMessage(message);
     setToastType(type);
-    setTimeout(() => {
+    toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
+      toastTimerRef.current = null;
     }, 3000);
   };
 

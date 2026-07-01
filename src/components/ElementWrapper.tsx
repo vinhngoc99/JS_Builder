@@ -11,6 +11,11 @@ interface ElementWrapperProps {
 
 export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElement }) => {
   const element = compat(rawElement) as any;
+  const elementType = element.type;
+  const elementText = element.text || '';
+  const elementFontSize = element.fontSize;
+  const elementFontFamily = element.fontFamily;
+  const elementBorderWidth = element.borderWidth || 0;
   const { 
     elements, selectedIds, selectElement, updateElement, setConnectingNode, connectingNode, 
     addConnection, scale, editingFocalPointId, setEditingFocalPointId, saveHistory, isSnapEnabled, guides,
@@ -154,7 +159,7 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
 
   useEffect(() => {
     if (isEditingText && editableRef.current) {
-      const initialText = element.type === 'shape' ? ((element as any).text || '') : (element.text || '');
+      const initialText = elementType === 'shape' ? elementText : elementText;
       editableRef.current.innerHTML = initialText;
       
       editableRef.current.focus();
@@ -170,21 +175,20 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
         console.error(err);
       }
     }
-  }, [isEditingText]);
+  }, [isEditingText, elementText, elementType]);
   // Auto-resize text element height to fit content if content overflows
   useEffect(() => {
-    if (element.type === 'text' && !isEditingText && wrapperRef.current) {
+    if (elementType === 'text' && !isEditingText && wrapperRef.current) {
       const textContainer = wrapperRef.current.querySelector('.text-element-content') as HTMLElement;
       if (textContainer) {
         const scrollH = textContainer.scrollHeight;
-        const borderWidth = (element as any).borderWidth || 0;
-        const neededHeight = scrollH + 18 + (borderWidth * 2);
+        const neededHeight = scrollH + 18 + (elementBorderWidth * 2);
         if (neededHeight > element.height + 2) { // Add 2px tolerance to prevent infinite loop
           updateElement(element.id, { height: Math.ceil(neededHeight) });
         }
       }
     }
-  }, [element.text, element.width, (element as any).fontSize, (element as any).fontFamily, element.type, isEditingText, updateElement, element.height, (element as any).borderWidth]);
+  }, [elementText, element.width, elementFontSize, elementFontFamily, elementType, isEditingText, updateElement, element.height, elementBorderWidth, element.id]);
 
   const saveTextEdit = (e?: React.FocusEvent) => {
     let isTargetSafe = false;
@@ -766,8 +770,8 @@ export const ElementWrapper: React.FC<ElementWrapperProps> = ({ element: rawElem
           const scaleW = newW / startElement.current.w;
           const scaleH = newH / startElement.current.h;
           const box = startBox.current;
-          let newBoxW = box.w * scaleW;
-          let newBoxH = box.h * scaleH;
+          const newBoxW = box.w * scaleW;
+          const newBoxH = box.h * scaleH;
           let newBoxX = box.x;
           let newBoxY = box.y;
 

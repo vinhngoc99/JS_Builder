@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useBuilder } from '../BuilderContext';
 import { ElementWrapper } from './ElementWrapper';
 import { MousePointer2, Type, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw, X, Smile } from 'lucide-react';
@@ -32,6 +32,8 @@ export const Canvas: React.FC = () => {
   const brushCursorRef = useRef<HTMLDivElement>(null);
   const isResizingBrushRef = useRef(false);
   const startResizeInfoRef = useRef({ x: 0, width: 0 });
+  const shouldAutoFitInitialViewRef = useRef(elements.length > 0);
+  const didAutoFitInitialViewRef = useRef(false);
   
   const [snapGuides, setSnapGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const [draggedGuide, setDraggedGuide] = useState<{ id: string; type: 'horizontal' | 'vertical'; isNew: boolean } | null>(null);
@@ -185,18 +187,29 @@ export const Canvas: React.FC = () => {
     }
     const padding = 50;
     const rect = canvasRef.current.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     elements.filter(el => !el.parentId).forEach(el => {
       minX = Math.min(minX, el.x); minY = Math.min(minY, el.y);
       maxX = Math.max(maxX, el.x + el.width); maxY = Math.max(maxY, el.y + el.height);
     });
     const contentWidth = maxX - minX, contentHeight = maxY - minY;
+    if (!Number.isFinite(contentWidth) || !Number.isFinite(contentHeight) || contentWidth <= 0 || contentHeight <= 0) return;
     const availableWidth = rect.width - padding * 2, availableHeight = rect.height - padding * 2;
     const newScale = Math.min(Math.min(availableWidth / contentWidth, availableHeight / contentHeight), 1.5);
     const centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
     const newPanX = rect.width / 2 - centerX * newScale, newPanY = rect.height / 2 - centerY * newScale;
     setScale(newScale); setPan({ x: newPanX, y: newPanY });
   }, [elements, setScale, setPan]);
+
+  useEffect(() => {
+    if (!shouldAutoFitInitialViewRef.current || didAutoFitInitialViewRef.current || elements.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      zoomToFit();
+      didAutoFitInitialViewRef.current = true;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [elements.length, zoomToFit]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -304,7 +317,7 @@ export const Canvas: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool, zoomToFit, brushWidth, setBrushWidth]);
+  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, handleNextClick, handlePrevClick, saveHistory, updateElement, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool, zoomToFit, brushWidth, setBrushWidth]);
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
@@ -558,8 +571,9 @@ export const Canvas: React.FC = () => {
   };
 
   const getAbsoluteBounds = (id: string) => {
-    let el = elements.find(e => e.id === id); if (!el) return null;
-    let { x, y, width, height } = el;
+    const el = elements.find(e => e.id === id); if (!el) return null;
+    let { x, y } = el;
+    const { width, height } = el;
     if (el.parentId) { const parent = elements.find(e => e.id === el?.parentId); if (parent) { x += parent.x + 16; y += parent.y + 45 + 16; } }
     return { x, y, width, height, rotation: el.rotation || 0 };
   };
@@ -606,8 +620,8 @@ export const Canvas: React.FC = () => {
     const centerY = bounds.y + bounds.height / 2;
     let localX = 0;
     let localY = 0;
-    let normalX = 1;
-    let normalY = 0;
+    let normalX: number;
+    let normalY: number;
 
     if (port === 'top') {
       localY = -bounds.height / 2;
@@ -637,9 +651,11 @@ export const Canvas: React.FC = () => {
   while (currentGridSize < 15) currentGridSize *= 2;
   while (currentGridSize > 60) currentGridSize /= 2;
 
-  const presentationSlides = elements
+  const elementById = useMemo(() => new Map(elements.map(el => [el.id, el])), [elements]);
+  const rootElements = useMemo(() => elements.filter(el => !el.parentId), [elements]);
+  const presentationSlides = useMemo(() => elements
     .filter(el => el.type === 'node' && (el as any).isSlide !== false)
-    .sort((a, b) => a.x - b.x);
+    .sort((a, b) => a.x - b.x), [elements]);
   const currentPresentationSlide = presentationSlides[currentSlideIndex];
   useEffect(() => {
     if (presentationSlides.length === 0) {
@@ -901,7 +917,7 @@ export const Canvas: React.FC = () => {
             })()}
           </svg>
 
-          {elements.filter(el => !el.parentId).map(el => (
+          {rootElements.map(el => (
             <ElementWrapper key={el.id} element={el} />
           ))}
 
@@ -958,7 +974,7 @@ export const Canvas: React.FC = () => {
 
           <svg className="brush-layer" style={{ overflow: 'visible', position: 'absolute', zIndex: 1000, pointerEvents: 'none' }}>
             {brushStrokes.map(s => {
-              const attachedNode = elements.find(el => el.id === s.attachedNodeId);
+              const attachedNode = s.attachedNodeId ? elementById.get(s.attachedNodeId) : null;
               const isHidden = attachedNode ? !attachedNode.visible : false;
               return (
                 <path
@@ -1108,10 +1124,7 @@ export const Canvas: React.FC = () => {
               outline: 'none'
             }}
           >
-            {elements
-              .filter(el => el.type === 'node' && (el as any).isSlide !== false)
-              .sort((a, b) => a.x - b.x)
-              .map((slide, idx) => (
+            {presentationSlides.map((slide, idx) => (
                 <option key={slide.id} value={idx}>
                   Slide {idx + 1}: {slide.name || `Node ${idx + 1}`}
                 </option>

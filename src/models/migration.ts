@@ -14,6 +14,16 @@ function isNewFormat(el: any): boolean {
   return !!el && !!el.fill && typeof el.fill === 'object' && 'type' in el.fill;
 }
 
+function hasOwn(obj: any, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function normalizeName(source: any, fallback: string): string {
+  if (hasOwn(source, 'name')) return source.name ?? '';
+  if (hasOwn(source, 'title')) return source.title ?? '';
+  return fallback;
+}
+
 function normalizeFill(fill: any, fallback: FillStyle): FillStyle {
   if (!fill || typeof fill !== 'object') return { ...fallback };
   return {
@@ -130,7 +140,7 @@ function normalizeNewElement(el: any): CanvasElement {
     ...el,
     id: el.id,
     type: el.type,
-    name: el.name || el.title || `${el.type || 'Element'} ${el.id?.substring?.(0, 6) || ''}`,
+    name: normalizeName(el, `${el.type || 'Element'} ${el.id?.substring?.(0, 6) || ''}`),
     x: el.x ?? 0,
     y: el.y ?? 0,
     width: el.width ?? 100,
@@ -191,7 +201,7 @@ export function migrateElement(old: any): CanvasElement {
   const base: any = {
     id: old.id,
     type: old.type,
-    name: old.title || old.name || `${old.type || 'Element'} ${old.id?.substring?.(0, 6) || ''}`,
+    name: normalizeName(old, `${old.type || 'Element'} ${old.id?.substring?.(0, 6) || ''}`),
     x: old.x ?? 0,
     y: old.y ?? 0,
     width: old.width ?? 100,

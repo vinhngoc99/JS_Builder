@@ -32,10 +32,8 @@ const safeParse = <T,>(key: string, fallback: T): T => {
 };
 
 /** Create a debounced version of a function */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const debounce = <T extends (...args: any[]) => void>(fn: T, delay: number): T => {
   let timer: ReturnType<typeof setTimeout>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return ((...args: any[]) => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
@@ -290,7 +288,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const parsed = JSON.parse(savedVariants) as Variant[];
         const active = parsed.find(v => v.id === savedActiveId);
         if (active) return migrateElements(active.elements);
-      } catch {}
+      } catch {
+        // Ignore malformed saved variants and fall back to legacy keys.
+      }
     }
     return migrateElements(safeParse('js-builder-elements', []));
   });
@@ -303,7 +303,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const parsed = JSON.parse(savedVariants) as Variant[];
         const active = parsed.find(v => v.id === savedActiveId);
         if (active) return migrateConnections(active.connections);
-      } catch {}
+      } catch {
+        // Ignore malformed saved variants and fall back to legacy keys.
+      }
     }
     return migrateConnections(safeParse('js-builder-connections', []));
   });
@@ -316,7 +318,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const parsed = JSON.parse(savedVariants) as Variant[];
         const active = parsed.find(v => v.id === savedActiveId);
         if (active) return active.brushStrokes;
-      } catch {}
+      } catch {
+        // Ignore malformed saved variants and fall back to legacy keys.
+      }
     }
     return safeParse('js-builder-brush', []);
   });
@@ -334,7 +338,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         const parsed = JSON.parse(savedVariants) as Variant[];
         const active = parsed.find(v => v.id === savedActiveId);
         if (active) return active.guides;
-      } catch {}
+      } catch {
+        // Ignore malformed saved variants and fall back to legacy keys.
+      }
     }
     return safeParse('js-builder-guides', []);
   });
@@ -381,8 +387,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   };
 
-  const [_history, setHistory] = useState<HistoryState[]>([]);
-  const [_redoStack, setRedoStack] = useState<HistoryState[]>([]);
+  const [, setHistory] = useState<HistoryState[]>([]);
+  const [, setRedoStack] = useState<HistoryState[]>([]);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
@@ -410,6 +416,52 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   connectionsRef.current = connections;
   brushStrokesRef.current = brushStrokes;
 
+  const getElementCanvasBounds = useCallback((el: CanvasElement, allElements: CanvasElement[] = elementsRef.current) => {
+    const chain: CanvasElement[] = [el];
+    let parentId = el.parentId;
+    while (parentId) {
+      const parent = allElements.find(parentEl => parentEl.id === parentId);
+      if (!parent) break;
+      chain.unshift(parent);
+      parentId = parent.parentId;
+    }
+
+    const root = chain[0];
+    let bounds = { x: root.x, y: root.y, width: root.width, height: root.height };
+    for (const child of chain.slice(1)) {
+      bounds = child.fillParent
+        ? {
+            x: bounds.x + 16,
+            y: bounds.y + 45 + 16,
+            width: Math.max(1, bounds.width - 32),
+            height: Math.max(1, bounds.height - 45 - 32),
+          }
+        : {
+            x: bounds.x + 16 + child.x,
+            y: bounds.y + 45 + 16 + child.y,
+            width: child.width,
+            height: child.height,
+          };
+    }
+    return bounds;
+  }, []);
+
+  const findBrushAttachmentElementId = useCallback((points: { x: number; y: number }[], allElements: CanvasElement[] = elementsRef.current): string | null => {
+    for (let i = allElements.length - 1; i >= 0; i--) {
+      const el = allElements[i];
+      if (el.visible === false) continue;
+      const bounds = getElementCanvasBounds(el, allElements);
+      const intersects = points.some(p =>
+        p.x >= bounds.x &&
+        p.x <= bounds.x + bounds.width &&
+        p.y >= bounds.y &&
+        p.y <= bounds.y + bounds.height
+      );
+      if (intersects) return el.id;
+    }
+    return null;
+  }, [getElementCanvasBounds]);
+
   const saveHistory = useCallback(() => {
     const snapshot: HistoryState = {
       elements: structuredClone(elementsRef.current),
@@ -434,8 +486,9 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, [saveHistory]);
 
   useEffect(() => {
+    const historyScopes = historyScopesRef.current;
     return () => {
-      Object.values(historyScopesRef.current).forEach(timer => window.clearTimeout(timer));
+      Object.values(historyScopes).forEach(timer => window.clearTimeout(timer));
     };
   }, []);
 
@@ -587,27 +640,31 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     localStorage.setItem('js-builder-brush', JSON.stringify(data));
   }, 500)).current;
 
+  const debouncedSaveVariants = useRef(debounce((data: Variant[]) => {
+    localStorage.setItem('js-builder-variants', JSON.stringify(data));
+  }, 500)).current;
+
   useEffect(() => { debouncedSaveElements(elements); }, [elements, debouncedSaveElements]);
   useEffect(() => { debouncedSaveConnections(connections); }, [connections, debouncedSaveConnections]);
   useEffect(() => { debouncedSaveBrush(brushStrokes); }, [brushStrokes, debouncedSaveBrush]);
 
-  const prevNodePositionsRef = useRef<Record<string, { x: number; y: number }>>({});
+  const prevElementPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
 
   useEffect(() => {
     const currentPositions: Record<string, { x: number; y: number }> = {};
-    const nodes = elements.filter(el => el.type === 'node');
     
     let hasChanges = false;
     const updates: Record<string, { dx: number; dy: number }> = {};
     
-    nodes.forEach(node => {
-      currentPositions[node.id] = { x: node.x, y: node.y };
-      const prev = prevNodePositionsRef.current[node.id];
+    elements.forEach(el => {
+      const bounds = getElementCanvasBounds(el, elements);
+      currentPositions[el.id] = { x: bounds.x, y: bounds.y };
+      const prev = prevElementPositionsRef.current[el.id];
       if (prev) {
-        const dx = node.x - prev.x;
-        const dy = node.y - prev.y;
+        const dx = bounds.x - prev.x;
+        const dy = bounds.y - prev.y;
         if (dx !== 0 || dy !== 0) {
-          updates[node.id] = { dx, dy };
+          updates[el.id] = { dx, dy };
           hasChanges = true;
         }
       }
@@ -626,8 +683,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       }));
     }
     
-    prevNodePositionsRef.current = currentPositions;
-  }, [elements]);
+    prevElementPositionsRef.current = currentPositions;
+  }, [elements, getElementCanvasBounds]);
 
   const lastActiveVariantIdRef = useRef(activeVariantId);
 
@@ -644,9 +701,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
     }));
   }, [elements, connections, brushStrokes, guides, activeVariantId]);
 
-  useEffect(() => {
-    localStorage.setItem('js-builder-variants', JSON.stringify(variants));
-  }, [variants]);
+  useEffect(() => { debouncedSaveVariants(variants); }, [variants, debouncedSaveVariants]);
 
   useEffect(() => {
     localStorage.setItem('js-builder-active-variant', activeVariantId);
@@ -820,16 +875,19 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       let importedElements: CanvasElement[] = [];
       let importedConnections: Connection[] = [];
+      let importedBrushStrokes: BrushStroke[] = [];
 
       if (state.variants && state.activeVariantId) {
         const active = state.variants.find((v: any) => v.id === state.activeVariantId) || state.variants[0];
         if (active) {
           importedElements = active.elements || [];
           importedConnections = active.connections || [];
+          importedBrushStrokes = active.brushStrokes || [];
         }
       } else if (state.elements) {
         importedElements = state.elements || [];
         importedConnections = state.connections || [];
+        importedBrushStrokes = state.brushStrokes || [];
       } else {
         return false;
       }
@@ -859,15 +917,31 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         };
       }) as CanvasElement[];
 
-      const newConnections = importedConnections.map(conn => ({
-        ...conn,
-        id: uuidv4(),
-        fromId: idMap.get(conn.fromId) || conn.fromId,
-        toId: idMap.get(conn.toId) || conn.toId,
-      })) as Connection[];
+      const existingIds = new Set(elementsRef.current.map(el => el.id));
+      const newConnections = importedConnections
+        .filter(conn =>
+          (idMap.has(conn.fromId) || existingIds.has(conn.fromId)) &&
+          (idMap.has(conn.toId) || existingIds.has(conn.toId))
+        )
+        .map(conn => ({
+          ...conn,
+          id: uuidv4(),
+          fromId: idMap.get(conn.fromId) || conn.fromId,
+          toId: idMap.get(conn.toId) || conn.toId,
+        })) as Connection[];
+
+      const newBrushStrokes = importedBrushStrokes
+        .filter(stroke => Array.isArray(stroke.points))
+        .map(stroke => ({
+          ...stroke,
+          id: uuidv4(),
+          attachedNodeId: stroke.attachedNodeId ? (idMap.get(stroke.attachedNodeId) || null) : null,
+          points: stroke.points.map(p => ({ x: p.x + 50, y: p.y + 50 })),
+        }));
 
       setElements(prev => [...prev, ...newElements]);
       setConnections(prev => [...prev, ...newConnections]);
+      setBrushStrokes(prev => [...prev, ...newBrushStrokes]);
       setSelectedIds(newElements.map(el => el.id));
 
       return true;
@@ -1362,21 +1436,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const addBrushStroke = (stroke: BrushStroke) => {
     saveHistory();
-    const nodes = elementsRef.current.filter(el => el.type === 'node');
-    let attachedNodeId: string | null = null;
-    for (let i = nodes.length - 1; i >= 0; i--) {
-      const node = nodes[i];
-      const intersects = stroke.points.some(p =>
-        p.x >= node.x &&
-        p.x <= node.x + node.width &&
-        p.y >= node.y &&
-        p.y <= node.y + node.height
-      );
-      if (intersects) {
-        attachedNodeId = node.id;
-        break;
-      }
-    }
+    const attachedNodeId = findBrushAttachmentElementId(stroke.points);
     const updatedStroke = { ...stroke, attachedNodeId };
     setBrushStrokes(prev => [...prev, updatedStroke]);
   };
@@ -1863,6 +1923,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       ${fontLinkTags}
+      <link href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600;700&display=swap" rel="stylesheet">
       <style>
         @font-face {
           font-family: 'Google Sans Display';
@@ -2008,6 +2069,14 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         .notification-toast { position: fixed; top: 76px; right: 20px; max-width: min(420px, calc(100vw - 40px)); background: var(--bg-toolbar); color: var(--text-primary); padding: 14px 20px; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); z-index: 10000; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateX(120%); opacity: 0; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; pointer-events: none; }
         .notification-toast.show { transform: translateX(0); opacity: 1; }
         .zoom-controls { position: fixed; bottom: 20px; right: 20px; background: var(--bg-toolbar); padding: 4px; padding-left: 12px; border-radius: 20px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px; color: var(--text-primary); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+        .html-context-menu { position: fixed; display: none; min-width: 140px; padding: 6px; background: var(--bg-toolbar); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.55); z-index: 10001; }
+        .html-context-menu.open { display: block; }
+        .html-context-menu button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: transparent; border: none; border-radius: 6px; color: var(--text-primary); font-size: 12px; font-weight: 600; cursor: pointer; text-align: left; }
+        .html-context-menu button:hover { background: rgba(92,107,192,0.2); }
+        .runtime-text-selected { outline: 1px solid #4caf50; outline-offset: 2px; }
+        .runtime-text-content[contenteditable="true"] { outline: 1px solid #4caf50; background: rgba(0,0,0,0.18); cursor: text; pointer-events: auto; }
+        .html-context-menu button.danger { color: #ef5350; }
+        .html-context-menu button.danger:hover { background: rgba(239,83,80,0.14); }
         .btn-fit { background: #3f51b5; border: none; color: white; padding: 6px 14px; border-radius: 16px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s; white-space: nowrap; box-shadow: 0 4px 12px rgba(63, 81, 181, 0.3); }
         .btn-fit:hover { background: #4c5fd7; transform: scale(1.05); }
         .brush-toolbar { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: var(--bg-toolbar); padding: 10px; borderRadius: 12px; border: 1px solid var(--border-color); z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.5); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease; }
@@ -2234,6 +2303,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
            <svg id="canvas-svg-top" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; overflow: visible;"><g id="edit-brush-layer" pointer-events="none">${activeRendered.brushPaths}</g><g id="brush-layer"></g></svg>
         </div>
       </div>
+      <div id="html-context-menu" class="html-context-menu">
+        <button id="ctx-add-text" type="button">Add Text</button>
+        <button id="ctx-delete-text" class="danger" type="button" style="display:none;">Delete Text</button>
+      </div>
       <div class="brush-toolbar hidden-toolbar">
         <button id="brush-toggle" class="btn-tool" title="Brush (B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
         <button id="eraser-toggle" class="btn-tool" title="Eraser (E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.9-9.9c1-1 2.5-1 3.4 0l4.3 4.3c1 1 1 2.5 0 3.4L10.5 21c-1 1-2.5 1-3.4 0Z"/><path d="m11 6 4 4"/></svg></button>
@@ -2249,6 +2322,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
         </div>
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <div class="color-picker-btn"><input type="color" id="brush-color" value="#4caf50" style="width:150%;height:150%;margin:-25%;border:none;cursor:pointer;background:none;"></div>
+        <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
+        <div style="display:flex; align-items:center; gap:6px; padding:0 4px;" title="Text color">
+          <span style="font-size:11px; color:var(--text-secondary); user-select:none;">Text:</span>
+          <div class="color-picker-btn"><input type="color" id="runtime-text-color" value="#e0e0e0" style="width:150%;height:150%;margin:-25%;border:none;cursor:pointer;background:none;"></div>
+        </div>
         <div style="width:1px; background:#3a3c50; margin:0 5px"></div>
         <button id="brush-hide" class="btn-tool" title="Hide Toolbar (H)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
       </div>
@@ -2300,6 +2378,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               localStorage.setItem('theme', isLight ? 'light' : 'dark');
             } catch (e) {}
             updateThemeIcons(isLight);
+            updateDefaultRuntimeTextColors();
           };
           function updateThemeIcons(isLight) {
             const sunIcon = document.querySelector('.sun-icon');
@@ -2329,7 +2408,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           let originalEditBrushHTML = document.getElementById('edit-brush-layer') ? document.getElementById('edit-brush-layer').innerHTML : '';
           let hiddenNodes = ${scriptJson(activeRendered.hiddenNodes)};
           let hiddenConnections = ${scriptJson(activeRendered.hiddenConnections)};
-          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step', lastRightClickReset = { id: null, time: 0 }, userInteracted = false;
+          let scale = 1, pan = { x: 0, y: 0 }, isBrushMode = false, isSpaceDown = false, isPanning = false, currentStroke = null, activeDrag = null, startDrag = { x: 0, y: 0, ex: 0, ey: 0 }, startPan = { x: 0, y: 0, px: 0, py: 0 }, brushTool = 'draw', isErasing = false, lastEraserPos = null, isAutoplayActive = false, autoplayInterval = null, autoplayMode = 'step', lastRightClickReset = { id: null, time: 0 }, userInteracted = false, activeRuntimeTextId = null, contextMenuRuntimeTextId = null, nextRuntimeTextColor = getDefaultRuntimeTextColor(), nextRuntimeTextUsesThemeColor = true;
           let isLaserActive = false, laserPos = { x: -100, y: -100 }, laserTrail = [];
 
           const brushCursorEl = document.getElementById('brush-cursor-el');
@@ -2362,6 +2441,54 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             const projX = a.x + t * (b.x - a.x);
             const projY = a.y + t * (b.y - a.y);
             return Math.hypot(p.x - projX, p.y - projY);
+          }
+
+          function getElementCanvasBounds(el) {
+            if (el && el.parentId) {
+              const parent = elements.find(parentEl => parentEl.id === el.parentId);
+              if (parent) {
+                const parentBounds = getElementCanvasBounds(parent);
+                if (el.fillParent) {
+                  return {
+                    x: parentBounds.x + 16,
+                    y: parentBounds.y + 45 + 16,
+                    width: Math.max(1, parentBounds.width - 32),
+                    height: Math.max(1, parentBounds.height - 45 - 32)
+                  };
+                }
+                return {
+                  x: parentBounds.x + 16 + el.x,
+                  y: parentBounds.y + 45 + 16 + el.y,
+                  width: el.width,
+                  height: el.height
+                };
+              }
+            }
+            return { x: el.x, y: el.y, width: el.width, height: el.height };
+          }
+
+          function getDescendantElementIds(parentId) {
+            const ids = [];
+            const queue = [parentId];
+            while (queue.length) {
+              const currentId = queue.shift();
+              elements.forEach(el => {
+                if (el.parentId === currentId) {
+                  ids.push(el.id);
+                  queue.push(el.id);
+                }
+              });
+            }
+            return ids;
+          }
+
+          function translateAttachedBrushPaths(id, dx, dy) {
+            const targetIds = [id, ...getDescendantElementIds(id)];
+            targetIds.forEach(targetId => {
+              document.querySelectorAll('path[data-attached-node-id="' + targetId + '"]').forEach(path => {
+                translateBrushPath(path, dx, dy);
+              });
+            });
           }
 
           function brushPtsToD(ptsStr) {
@@ -2500,10 +2627,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             wrapper.style.left = original.x + 'px';
             wrapper.style.top = original.y + 'px';
 
-            if (current.type === 'node' && (dx !== 0 || dy !== 0)) {
-              document.querySelectorAll('path[data-attached-node-id="' + id + '"]').forEach(path => {
-                translateBrushPath(path, dx, dy);
-              });
+            if (dx !== 0 || dy !== 0) {
+              translateAttachedBrushPaths(id, dx, dy);
             }
 
             updateConnections();
@@ -2517,6 +2642,296 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 3000);
           };
+
+          const htmlContextMenu = document.getElementById('html-context-menu');
+          let contextMenuCanvasPos = null;
+
+          function hideHtmlContextMenu() {
+            if (htmlContextMenu) htmlContextMenu.classList.remove('open');
+            contextMenuCanvasPos = null;
+            contextMenuRuntimeTextId = null;
+          }
+
+          function showHtmlContextMenu(clientX, clientY, canvasX, canvasY, runtimeTextId) {
+            if (!htmlContextMenu) return;
+            contextMenuCanvasPos = { x: canvasX, y: canvasY };
+            contextMenuRuntimeTextId = runtimeTextId || null;
+            const deleteTextBtn = document.getElementById('ctx-delete-text');
+            if (deleteTextBtn) deleteTextBtn.style.display = contextMenuRuntimeTextId ? 'flex' : 'none';
+            htmlContextMenu.classList.add('open');
+            const menuRect = htmlContextMenu.getBoundingClientRect();
+            const left = Math.min(clientX, window.innerWidth - menuRect.width - 8);
+            const top = Math.min(clientY, window.innerHeight - menuRect.height - 8);
+            htmlContextMenu.style.left = Math.max(8, left) + 'px';
+            htmlContextMenu.style.top = Math.max(8, top) + 'px';
+          }
+
+          function cssColorToHex(color) {
+            if (!color) return '#ffffff';
+            if (color[0] === '#') {
+              if (color.length === 4) return '#' + color.slice(1).split('').map(ch => ch + ch).join('');
+              return color.slice(0, 7);
+            }
+            const match = String(color).match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+            if (!match) return getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff';
+            return '#' + [match[1], match[2], match[3]].map(value => {
+              return Math.max(0, Math.min(255, parseInt(value, 10))).toString(16).padStart(2, '0');
+            }).join('');
+          }
+
+          function getDefaultRuntimeTextColor() {
+            return document.body.classList.contains('light-theme') ? '#111827' : '#ffffff';
+          }
+
+          function syncRuntimeTextColorInput(color) {
+            const input = document.getElementById('runtime-text-color');
+            if (input) input.value = cssColorToHex(color);
+          }
+
+          function selectRuntimeTextElement(id) {
+            activeRuntimeTextId = id;
+            document.querySelectorAll('.runtime-text-selected').forEach(el => el.classList.remove('runtime-text-selected'));
+            const wrapper = document.getElementById('el-wrapper-' + id);
+            const elData = elements.find(el => el.id === id);
+            if (wrapper) wrapper.classList.add('runtime-text-selected');
+            if (elData && elData.text) syncRuntimeTextColorInput(elData.text.color);
+          }
+
+          function clearRuntimeTextSelection() {
+            activeRuntimeTextId = null;
+            document.querySelectorAll('.runtime-text-selected').forEach(el => el.classList.remove('runtime-text-selected'));
+            syncRuntimeTextColorInput(nextRuntimeTextColor);
+          }
+
+          function applyRuntimeTextColor(color) {
+            nextRuntimeTextColor = color;
+            nextRuntimeTextUsesThemeColor = false;
+            if (!activeRuntimeTextId) return;
+            const elData = elements.find(el => el.id === activeRuntimeTextId);
+            const wrapper = document.getElementById('el-wrapper-' + activeRuntimeTextId);
+            const text = wrapper ? wrapper.querySelector('.runtime-text-content') : null;
+            if (elData && elData.text) {
+              elData.text.color = color;
+              elData.runtimeTextUsesThemeColor = false;
+              const original = originalElements.find(el => el.id === elData.id);
+              if (original) {
+                original.text = JSON.parse(JSON.stringify(elData.text));
+                original.runtimeTextUsesThemeColor = false;
+              }
+            }
+            if (text) text.style.color = color;
+          }
+
+          function updateDefaultRuntimeTextColors() {
+            const defaultColor = getDefaultRuntimeTextColor();
+            nextRuntimeTextColor = defaultColor;
+            nextRuntimeTextUsesThemeColor = true;
+            elements.forEach(el => {
+              if (el.type !== 'text' || !el.text || !el.id?.startsWith('runtime-text-')) return;
+              if (el.runtimeTextUsesThemeColor === false) return;
+              el.text.color = defaultColor;
+              const wrapper = document.getElementById('el-wrapper-' + el.id);
+              const text = wrapper ? wrapper.querySelector('.runtime-text-content') : null;
+              if (text) text.style.color = defaultColor;
+              const original = originalElements.find(item => item.id === el.id);
+              if (original) {
+                original.text = JSON.parse(JSON.stringify(el.text));
+                original.runtimeTextUsesThemeColor = true;
+              }
+            });
+            syncRuntimeTextColorInput(activeRuntimeTextId ? (elements.find(el => el.id === activeRuntimeTextId)?.text?.color || defaultColor) : defaultColor);
+          }
+
+          function deleteRuntimeTextElement(id) {
+            if (!id) return;
+            const wrapper = document.getElementById('el-wrapper-' + id);
+            if (wrapper) wrapper.remove();
+            elements = elements.filter(el => el.id !== id);
+            originalElements = originalElements.filter(el => el.id !== id);
+            document.querySelectorAll('path[data-attached-node-id="' + id + '"]').forEach(path => path.remove());
+            if (activeRuntimeTextId === id) clearRuntimeTextSelection();
+            showNotification('Text deleted');
+          }
+
+          function autoSizeRuntimeTextElement(elData, wrapper, shell, text) {
+            if (!elData || !wrapper || !shell || !text) return;
+            const padding = elData.text.padding || { top: 10, right: 14, bottom: 10, left: 14 };
+            const border = elData.stroke?.width ?? 0;
+            const minHeight = 64;
+            const measuredWidth = Math.max(180, Number(elData.width) || 180);
+            wrapper.style.width = measuredWidth + 'px';
+            const neededHeight = Math.ceil(Math.max(minHeight, text.scrollHeight + padding.top + padding.bottom + border * 2 + 4));
+            wrapper.style.height = neededHeight + 'px';
+            elData.width = measuredWidth;
+            elData.height = neededHeight;
+            shell.style.height = '100%';
+          }
+          syncRuntimeTextColorInput(nextRuntimeTextColor);
+
+          function createRuntimeTextElement(x, y) {
+            const maxZ = elements.reduce((value, el) => Math.max(value, Number(el.zIndex || 0)), 0);
+            const elData = {
+              id: 'runtime-text-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
+              type: 'text',
+              name: '',
+              x,
+              y,
+              width: 180,
+              height: 64,
+              rotation: 0,
+              opacity: 1,
+              visible: true,
+              disabled: false,
+              pinned: false,
+              parentId: null,
+              zIndex: maxZ + 1,
+              fill: { type: 'none', color: 'transparent' },
+              stroke: { width: 1, color: 'var(--border-color)', style: 'solid', radius: 4 },
+              shadow: { enabled: true, color: 'rgba(0,0,0,0.3)', blur: 8, offsetX: 0, offsetY: 4, spread: 0 },
+              runtimeTextUsesThemeColor: nextRuntimeTextUsesThemeColor,
+              text: {
+                content: 'Workflow Text',
+                fontSize: 16,
+                fontFamily: "'Lexend Deca', 'Google Sans Text', sans-serif",
+                fontWeight: 400,
+                fontStyle: 'normal',
+                textDecoration: 'none',
+                color: nextRuntimeTextColor || getDefaultRuntimeTextColor(),
+                align: 'center',
+                verticalAlign: 'middle',
+                lineHeight: 1.5,
+                letterSpacing: 0,
+                padding: { top: 10, right: 14, bottom: 10, left: 14 }
+              }
+            };
+            elements.push(elData);
+            originalElements.push(JSON.parse(JSON.stringify(elData)));
+            appendRuntimeTextElement(elData);
+            selectRuntimeTextElement(elData.id);
+            showNotification('Text added');
+          }
+
+          function appendRuntimeTextElement(elData) {
+            const layer = document.getElementById('elements-layer');
+            if (!layer) return;
+
+            const wrapper = document.createElement('div');
+            wrapper.id = 'el-wrapper-' + elData.id;
+            wrapper.className = 'draggable-element';
+            wrapper.dataset.id = elData.id;
+            wrapper.style.position = 'absolute';
+            wrapper.style.left = elData.x + 'px';
+            wrapper.style.top = elData.y + 'px';
+            wrapper.style.width = elData.width + 'px';
+            wrapper.style.height = elData.height + 'px';
+            wrapper.style.color = 'var(--text-primary)';
+            wrapper.style.transform = 'rotate(0deg)';
+            wrapper.style.transformOrigin = 'center center';
+            wrapper.style.zIndex = String(elData.zIndex || 2);
+            wrapper.style.opacity = '1';
+            wrapper.style.borderRadius = (elData.stroke?.radius ?? 4) + 'px';
+            wrapper.style.boxShadow = elData.shadow?.enabled ? (elData.shadow.offsetX + 'px ' + elData.shadow.offsetY + 'px ' + elData.shadow.blur + 'px ' + (elData.shadow.spread || 0) + 'px ' + elData.shadow.color) : '';
+            wrapper.style.cursor = 'grab';
+            wrapper.style.overflow = 'visible';
+
+            const shell = document.createElement('div');
+            shell.style.width = '100%';
+            shell.style.height = '100%';
+            shell.style.background = elData.fill?.type === 'solid' ? (elData.fill.color || 'transparent') : 'transparent';
+            shell.style.border = (elData.stroke?.width ?? 1) + 'px ' + (elData.stroke?.style || 'solid') + ' ' + (elData.stroke?.color || 'var(--border-color)');
+            shell.style.borderRadius = (elData.stroke?.radius ?? 4) + 'px';
+            shell.style.display = 'flex';
+            shell.style.alignItems = elData.text.verticalAlign === 'top' ? 'flex-start' : elData.text.verticalAlign === 'bottom' ? 'flex-end' : 'center';
+            shell.style.justifyContent = 'center';
+            shell.style.padding = elData.text.padding.top + 'px ' + elData.text.padding.right + 'px ' + elData.text.padding.bottom + 'px ' + elData.text.padding.left + 'px';
+            shell.style.boxSizing = 'border-box';
+            shell.style.overflow = 'hidden';
+            shell.style.pointerEvents = 'none';
+
+            const text = document.createElement('div');
+            text.className = 'runtime-text-content';
+            text.dataset.runtimeTextContent = 'true';
+            text.textContent = elData.text.content;
+            text.style.width = '100%';
+            text.style.textAlign = elData.text.align || 'center';
+            text.style.wordBreak = 'break-word';
+            text.style.fontSize = elData.text.fontSize + 'px';
+            text.style.fontFamily = elData.text.fontFamily;
+            text.style.fontWeight = String(elData.text.fontWeight);
+            text.style.fontStyle = elData.text.fontStyle || 'normal';
+            text.style.textDecoration = elData.text.textDecoration || 'none';
+            text.style.lineHeight = String(elData.text.lineHeight);
+            text.style.letterSpacing = elData.text.letterSpacing + 'px';
+            text.style.color = elData.text.color;
+            text.style.borderRadius = '4px';
+            text.style.overflow = 'visible';
+
+            shell.appendChild(text);
+            wrapper.appendChild(shell);
+            layer.appendChild(wrapper);
+            autoSizeRuntimeTextElement(elData, wrapper, shell, text);
+
+            wrapper.addEventListener('pointerdown', event => {
+              selectRuntimeTextElement(elData.id);
+            }, true);
+
+            wrapper.addEventListener('dblclick', event => {
+              event.stopPropagation();
+              selectRuntimeTextElement(elData.id);
+              text.contentEditable = 'true';
+              shell.style.pointerEvents = 'auto';
+              text.focus();
+              const range = document.createRange();
+              range.selectNodeContents(text);
+              const selection = window.getSelection();
+              if (selection) {
+                selection.removeAllRanges();
+                selection.addRange(range);
+              }
+            });
+
+            text.addEventListener('blur', () => {
+              text.contentEditable = 'false';
+              shell.style.pointerEvents = 'none';
+              elData.text.content = text.textContent || '';
+              autoSizeRuntimeTextElement(elData, wrapper, shell, text);
+              const original = originalElements.find(el => el.id === elData.id);
+              if (original) {
+                original.text = JSON.parse(JSON.stringify(elData.text));
+                original.width = elData.width;
+                original.height = elData.height;
+              }
+            });
+            text.addEventListener('input', () => {
+              elData.text.content = text.textContent || '';
+              autoSizeRuntimeTextElement(elData, wrapper, shell, text);
+            });
+            text.addEventListener('keydown', event => {
+              if (event.key === 'Escape') {
+                text.blur();
+              }
+            });
+          }
+
+          document.getElementById('ctx-add-text')?.addEventListener('click', event => {
+            event.stopPropagation();
+            if (contextMenuCanvasPos) {
+              createRuntimeTextElement(contextMenuCanvasPos.x, contextMenuCanvasPos.y);
+            }
+            hideHtmlContextMenu();
+          });
+          document.getElementById('ctx-delete-text')?.addEventListener('click', event => {
+            event.stopPropagation();
+            const id = contextMenuRuntimeTextId || activeRuntimeTextId;
+            if (id) deleteRuntimeTextElement(id);
+            hideHtmlContextMenu();
+          });
+
+          document.addEventListener('pointerdown', event => {
+            if (event.button !== 2 && htmlContextMenu && !htmlContextMenu.contains(event.target)) {
+              hideHtmlContextMenu();
+            }
+          }, true);
 
           function updateBrushToolClasses() {
             document.getElementById('brush-toggle').classList.toggle('primary', isBrushMode && brushTool === 'draw');
@@ -2568,6 +2983,10 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           document.getElementById('redo-btn').onclick = redo;
           document.getElementById('brush-hide').onclick = toggleToolbarVisibility;
           document.getElementById('brush-show-btn').onclick = toggleToolbarVisibility;
+          const runtimeTextColor = document.getElementById('runtime-text-color');
+          if (runtimeTextColor) {
+            runtimeTextColor.oninput = () => applyRuntimeTextColor(runtimeTextColor.value);
+          }
 
           const resetBtn = document.getElementById('reset-layout');
           if (resetBtn) {
@@ -3186,6 +3605,11 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               }
               return;
             }
+            if (!isInput && (e.key === 'Delete' || e.key === 'Backspace') && activeRuntimeTextId) {
+              e.preventDefault();
+              deleteRuntimeTextElement(activeRuntimeTextId);
+              return;
+            }
             if (e.code === 'Space' && !isInput) { e.preventDefault(); isSpaceDown = true; container.classList.add('space-down'); updateBrushCursor(); }
             if (e.key.toLowerCase() === 'b' && !isInput) {
               e.preventDefault();
@@ -3513,15 +3937,29 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
               const el = e.target.closest('.draggable-element');
               if (el) {
                 const id = el.id.replace('el-wrapper-', '');
-                const now = Date.now();
-                if (lastRightClickReset.id === id && now - lastRightClickReset.time < 550) {
-                  resetElementPosition(id);
+                const elData = elements.find(item => item.id === id);
+                if (elData && elData.id?.startsWith('runtime-text-')) {
+                  selectRuntimeTextElement(id);
                   lastRightClickReset = { id: null, time: 0 };
+                  const r = container.getBoundingClientRect();
+                  const canvasX = (e.clientX - r.left - pan.x) / scale;
+                  const canvasY = (e.clientY - r.top - pan.y) / scale;
+                  showHtmlContextMenu(e.clientX, e.clientY, canvasX, canvasY, id);
                 } else {
-                  lastRightClickReset = { id, time: now };
+                  const now = Date.now();
+                  if (lastRightClickReset.id === id && now - lastRightClickReset.time < 550) {
+                    resetElementPosition(id);
+                    lastRightClickReset = { id: null, time: 0 };
+                  } else {
+                    lastRightClickReset = { id, time: now };
+                  }
                 }
               } else {
                 lastRightClickReset = { id: null, time: 0 };
+                const r = container.getBoundingClientRect();
+                const canvasX = (e.clientX - r.left - pan.x) / scale;
+                const canvasY = (e.clientY - r.top - pan.y) / scale;
+                showHtmlContextMenu(e.clientX, e.clientY, canvasX, canvasY, null);
               }
               return;
             }
@@ -3550,12 +3988,20 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (e.target.closest('.brush-toolbar') || e.target.closest('#presentation-bar') || e.target.closest('.theme-toggle-btn') || e.target.closest('.zoom-controls') || e.target.closest('.conn-btn-group') || e.target.closest('.conn-btn')) {
               return;
             }
+            if (e.target.closest('[contenteditable="true"]')) {
+              return;
+            }
+            hideHtmlContextMenu();
             const el = e.target.closest('.draggable-element');
             if (el) {
+              const id = el.id.replace('el-wrapper-', '');
+              if (!id.startsWith('runtime-text-')) clearRuntimeTextSelection();
               activeDrag = el;
               startDrag = { x: e.clientX, y: e.clientY, ex: parseFloat(el.style.left), ey: parseFloat(el.style.top) };
               el.style.zIndex = 2000;
               e.stopPropagation();
+            } else {
+              clearRuntimeTextSelection();
             }
           }, false);
 
@@ -3602,9 +4048,8 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 const diffY = newY - elData.y;
                 elData.x = newX;
                 elData.y = newY;
-                if (elData.type === 'node' && (diffX !== 0 || diffY !== 0)) {
-                  const paths = document.querySelectorAll('path[data-attached-node-id="' + id + '"]');
-                  paths.forEach(path => translateBrushPath(path, diffX, diffY));
+                if (diffX !== 0 || diffY !== 0) {
+                  translateAttachedBrushPaths(id, diffX, diffY);
                 }
               }
               requestAnimationFrame(updateConnections);
@@ -3618,15 +4063,16 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
                 const [x, y] = pt.split(',').map(parseFloat);
                 return { x, y };
               });
-              const nodes = elements.filter(el => el.type === 'node');
               let attachedNodeId = null;
-              for (let i = nodes.length - 1; i >= 0; i--) {
-                const node = nodes[i];
+              for (let i = elements.length - 1; i >= 0; i--) {
+                const node = elements[i];
+                if (node.visible === false) continue;
+                const bounds = getElementCanvasBounds(node);
                 const intersects = pts.some(p =>
-                  p.x >= node.x &&
-                  p.x <= node.x + node.width &&
-                  p.y >= node.y &&
-                  p.y <= node.y + node.height
+                  p.x >= bounds.x &&
+                  p.x <= bounds.x + bounds.width &&
+                  p.y >= bounds.y &&
+                  p.y <= bounds.y + bounds.height
                 );
                 if (intersects) {
                   attachedNodeId = node.id;
@@ -3666,12 +4112,16 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
           };
 
           function getAbsoluteBounds(id) {
+            const data = elements.find(item => item.id === id);
+            if (data) {
+              const bounds = getElementCanvasBounds(data);
+              return { ...bounds, rotation: data.rotation || 0 };
+            }
             const el = document.getElementById('el-wrapper-' + id); if (!el) return null;
             let x = parseFloat(el.style.left), y = parseFloat(el.style.top);
             const parent = el.parentElement.closest('.is-node');
             if (parent) { x += parseFloat(parent.style.left) + 16; y += parseFloat(parent.style.top) + 45 + 16; }
-            const data = elements.find(item => item.id === id);
-            return { x, y, width: parseFloat(el.style.width), height: parseFloat(el.style.height), rotation: data ? (data.rotation || 0) : 0 };
+            return { x, y, width: parseFloat(el.style.width), height: parseFloat(el.style.height), rotation: 0 };
           }
 
           function rotateVector(x, y, degrees) {

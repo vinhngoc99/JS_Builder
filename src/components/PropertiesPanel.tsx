@@ -82,42 +82,67 @@ const loadImageDimensions = (src: string): Promise<{ width: number; height: numb
   img.src = src;
 });
 
-const compressImageFile = (file: File): Promise<{ src: string; width: number; height: number }> => new Promise((resolve, reject) => {
+const readImageFileOriginal = (file: File): Promise<{ src: string; width: number; height: number }> => new Promise((resolve, reject) => {
+  const objectUrl = URL.createObjectURL(file);
   const reader = new FileReader();
-  reader.onerror = () => reject(new Error('Could not read image file.'));
-  reader.onload = () => {
-    const img = new Image();
-    img.onerror = () => reject(new Error('Could not decode image file.'));
-    img.onload = () => {
-      const maxSide = 1600;
-      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-      const width = Math.max(1, Math.round(img.width * scale));
-      const height = Math.max(1, Math.round(img.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        reject(new Error('Canvas is not available.'));
-        return;
-      }
-      ctx.drawImage(img, 0, 0, width, height);
-      const mime = file.type === 'image/png' && file.size < 500_000 ? 'image/png' : 'image/jpeg';
-      resolve({
-        src: canvas.toDataURL(mime, mime === 'image/jpeg' ? 0.82 : undefined),
-        width,
-        height,
-      });
-    };
-    img.src = String(reader.result || '');
+  const img = new Image();
+  let readSrc = '';
+  let width = 0;
+  let height = 0;
+  let hasRead = false;
+  let hasDecoded = false;
+  let done = false;
+
+  const cleanup = () => URL.revokeObjectURL(objectUrl);
+  const maybeResolve = () => {
+    if (done || !hasRead || !hasDecoded) return;
+    done = true;
+    cleanup();
+    resolve({ src: readSrc, width, height });
   };
+  const fail = (error: Error) => {
+    if (done) return;
+    done = true;
+    cleanup();
+    reject(error);
+  };
+
+  reader.onerror = () => fail(new Error('Could not read image file.'));
+  reader.onload = () => {
+    readSrc = String(reader.result || '');
+    hasRead = true;
+    maybeResolve();
+  };
+
+  img.decoding = 'async';
+  img.onerror = () => fail(new Error('Could not decode image file.'));
+  img.onload = () => {
+    width = img.naturalWidth || img.width;
+    height = img.naturalHeight || img.height;
+    hasDecoded = true;
+    maybeResolve();
+  };
+
+  img.src = objectUrl;
   reader.readAsDataURL(file);
 });
 
 
 const NumberInput = ({ label, value, onChange, min, max, disabled, style }: any) => {
-  const [localValue, setLocalValue] = React.useState(String(Math.round(value)));
-  React.useEffect(() => { setLocalValue(String(Math.round(value))); }, [value]);
+  const normalizeNumber = (nextValue: unknown) => {
+    const parsed = typeof nextValue === 'number' ? nextValue : parseFloat(String(nextValue ?? ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const clampNumber = (nextValue: number) => {
+    let clamped = Number.isFinite(nextValue) ? nextValue : 0;
+    if (min !== undefined) clamped = Math.max(min, clamped);
+    if (max !== undefined) clamped = Math.min(max, clamped);
+    return clamped;
+  };
+
+  const [localValue, setLocalValue] = React.useState(String(Math.round(normalizeNumber(value))));
+  React.useEffect(() => { setLocalValue(String(Math.round(normalizeNumber(value)))); }, [value]);
   
   return (
     <div>
@@ -131,10 +156,7 @@ const NumberInput = ({ label, value, onChange, min, max, disabled, style }: any)
           if (!isNaN(parsed)) onChange(parsed);
         }}
         onBlur={() => {
-          let parsed = parseFloat(localValue);
-          if (isNaN(parsed)) parsed = 0;
-          if (min !== undefined) parsed = Math.max(min, parsed);
-          if (max !== undefined) parsed = Math.min(max, parsed);
+          const parsed = clampNumber(parseFloat(localValue));
           setLocalValue(String(parsed));
           onChange(parsed);
         }}
@@ -1015,10 +1037,10 @@ export const PropertiesPanel: React.FC = () => {
                           await showAlert('Image is too large. Please choose an image under 12MB.', 'Upload image');
                           return;
                         }
-                        const compressed = await compressImageFile(file);
+                        const uploaded = await readImageFileOriginal(file);
                         handlePanelChange({
-                          src: compressed.src,
-                          ...getFittedImageSize(compressed.width, compressed.height),
+                          src: uploaded.src,
+                          ...getFittedImageSize(uploaded.width, uploaded.height),
                           alt: file.name,
                         } as any);
                       } catch (error) {
