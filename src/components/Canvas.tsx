@@ -1,26 +1,44 @@
 import React, { useRef, useState, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useBuilder } from '../BuilderContext';
-import { ElementWrapper } from './ElementWrapper';
+import { PixiWorkspace } from './PixiWorkspace';
+import { CoordinateSystem } from '../workspace/CoordinateSystem';
+import { GraphGeometry } from '../workspace/GraphGeometry';
+import type { SceneRenderer } from '../workspace/SceneRenderer';
+import type { Viewport } from '../workspace/CoordinateSystem';
 import { MousePointer2, Type, Play, Image as ImageIcon, Layout, Pencil, Trash2, Copy, Eraser, RotateCcw, RotateCw, X, Smile } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { ALL_EFFECTS } from '../animations/effects';
 import { getSlideAnimationSteps } from '../animations';
-import { getConnectionArrow, getConnectionDasharray, getConnectionStroke } from '../models/Connection';
 
 export const Canvas: React.FC = () => {
   const { 
-    elements, connections, selectElement, connectingNode, setConnectingNode, 
+    elements, selectElement, connectingNode, setConnectingNode,
     selectedIds, selectedConnectionId, selectConnection, removeConnection, 
     scale, setScale, pan, setPan, editingFocalPointId, setEditingFocalPointId, 
     addElement, removeSelected, duplicateSelected, updateElement,
-    brushStrokes, isBrushMode, brushColor, brushWidth, setBrushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo, saveHistory,
-    guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isSnapEnabled, isPresenting, setIsPresenting,
+    isBrushMode, brushColor, brushWidth, setBrushWidth, addBrushStroke, clearBrush, setBrushMode, setBrushColor, undo, redo, saveHistory,
+    guides, addGuide, updateGuide, removeGuide, copySelected, pasteCopied, selectAll, isPresenting, setIsPresenting,
     currentSlideIndex, setCurrentSlideIndex, revealDownstream, isHelpOpen, setIsHelpOpen,
     brushTool, setBrushTool, eraseBrushStrokesAt,
     playedAnimationIds, setPlayedAnimationIds
   } = useBuilder();
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<SceneRenderer | null>(null);
+  const viewportRef = useRef<Viewport>({ pan, scale });
+  const viewportTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { if (!viewportTimer.current) viewportRef.current = { pan, scale }; }, [pan, scale]);
+  const commitViewport = useCallback(() => {
+    if (viewportTimer.current) clearTimeout(viewportTimer.current);
+    viewportTimer.current = null;
+    setScale(viewportRef.current.scale); setPan(viewportRef.current.pan);
+  }, [setPan, setScale]);
+  const applyViewport = useCallback((viewport: Viewport) => {
+    viewportRef.current = viewport;
+    rendererRef.current?.setViewport(viewport);
+    if (!viewportTimer.current) viewportTimer.current = setTimeout(commitViewport, 120);
+  }, [commitViewport]);
+  const replaceViewport = useCallback((viewport: Viewport) => { applyViewport(viewport); commitViewport(); }, [applyViewport, commitViewport]);
+  useEffect(() => () => { if (viewportTimer.current) clearTimeout(viewportTimer.current); }, []);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -42,6 +60,7 @@ export const Canvas: React.FC = () => {
   const [laserPos, setLaserPos] = useState({ x: -100, y: -100 });
   const [laserTrail, setLaserTrail] = useState<{ x: number; y: number }[]>([]);
   const [showSpeakerNotes, setShowSpeakerNotes] = useState(false);
+  const presentedSlideIndex = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isLaserActive) return;
@@ -89,6 +108,7 @@ export const Canvas: React.FC = () => {
     const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
     if (slides.length === 0) return;
     const safeIndex = Math.max(0, Math.min(index, slides.length - 1));
+    presentedSlideIndex.current = safeIndex;
     
     const targetSlide = slides[safeIndex];
     const targetAnimations: string[] = [];
@@ -124,20 +144,9 @@ export const Canvas: React.FC = () => {
     if (!canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
-    const padding = 60;
-    const availW = rect.width - padding * 2;
-    const availH = rect.height - padding * 2;
-    
-    const scaleX = availW / slide.width;
-    const scaleY = availH / slide.height;
-    const targetScale = Math.min(scaleX, scaleY, 2.0);
-    
-    const targetPanX = rect.width / 2 - (slide.x + slide.width / 2) * targetScale;
-    const targetPanY = rect.height / 2 - (slide.y + slide.height / 2) * targetScale;
-    
-    setScale(targetScale);
-    setPan({ x: targetPanX, y: targetPanY });
-  }, [elements, setScale, setPan, updateElement, revealDownstream, setCurrentSlideIndex, currentSlideIndex, playedAnimationIds, setPlayedAnimationIds]);
+    const bounds = new GraphGeometry(elements).layout(slide.id)?.bounds;
+    if (bounds) replaceViewport(CoordinateSystem.fit(bounds, rect, 60, 2));
+  }, [elements, replaceViewport, updateElement, revealDownstream, setCurrentSlideIndex, currentSlideIndex, playedAnimationIds, setPlayedAnimationIds]);
 
   const handleNextClick = useCallback(() => {
     const slides = elements.filter(el => el.type === 'node' && (el as any).isSlide !== false).sort((a, b) => a.x - b.x);
@@ -165,42 +174,22 @@ export const Canvas: React.FC = () => {
     }
   }, [currentSlideIndex, goToSlide]);
 
+  const wasPresenting = useRef(false);
   useEffect(() => {
-    if (isPresenting) {
-      goToSlide(currentSlideIndex);
-    } else {
-      setShowSpeakerNotes(false);
-    }
+    if (isPresenting && (!wasPresenting.current || presentedSlideIndex.current !== currentSlideIndex)) goToSlide(currentSlideIndex);
+    if (!isPresenting) setShowSpeakerNotes(false);
+    wasPresenting.current = isPresenting;
   }, [isPresenting, currentSlideIndex, goToSlide]);
 
-  // Expose snapGuides via window so ElementWrapper can update them during drag
-  useEffect(() => {
-    (window as any).setSnapGuides = setSnapGuides;
-    return () => { delete (window as any).setSnapGuides; };
-  }, []);
   
   const startPanInfo = useRef({ startX: 0, startY: 0, initialPanX: 0, initialPanY: 0 });
 
   const zoomToFit = useCallback(() => {
-    if (elements.length === 0 || !canvasRef.current) {
-      setScale(1); setPan({ x: 0, y: 0 }); return;
-    }
-    const padding = 50;
+    if (!canvasRef.current || !elements.length) return;
     const rect = canvasRef.current.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    elements.filter(el => !el.parentId).forEach(el => {
-      minX = Math.min(minX, el.x); minY = Math.min(minY, el.y);
-      maxX = Math.max(maxX, el.x + el.width); maxY = Math.max(maxY, el.y + el.height);
-    });
-    const contentWidth = maxX - minX, contentHeight = maxY - minY;
-    if (!Number.isFinite(contentWidth) || !Number.isFinite(contentHeight) || contentWidth <= 0 || contentHeight <= 0) return;
-    const availableWidth = rect.width - padding * 2, availableHeight = rect.height - padding * 2;
-    const newScale = Math.min(Math.min(availableWidth / contentWidth, availableHeight / contentHeight), 1.5);
-    const centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
-    const newPanX = rect.width / 2 - centerX * newScale, newPanY = rect.height / 2 - centerY * newScale;
-    setScale(newScale); setPan({ x: newPanX, y: newPanY });
-  }, [elements, setScale, setPan]);
+    const viewport = CoordinateSystem.fit(new GraphGeometry(elements).bounds(), rect);
+    replaceViewport(viewport);
+  }, [elements, replaceViewport]);
 
   useEffect(() => {
     if (!shouldAutoFitInitialViewRef.current || didAutoFitInitialViewRef.current || elements.length === 0) return;
@@ -228,7 +217,8 @@ export const Canvas: React.FC = () => {
         return;
       }
 
-      if (isPresenting) {
+      if (isPresenting && !isInput) {
+        if (e.code === 'Space' && e.shiftKey) { e.preventDefault(); handlePrevClick(); return; }
         if (e.key === 'ArrowRight' || e.key === ' ' || e.code === 'Space' || e.key === 'Enter') {
           e.preventDefault();
           handleNextClick();
@@ -313,41 +303,46 @@ export const Canvas: React.FC = () => {
         setBrushWidth(Math.max(1, brushWidth - 5));
       }
     };
-    const handleKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') { setIsSpaceDown(false); setIsPanning(false); } };
+    const handleKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') { setIsSpaceDown(false); setIsPanning(false); commitViewport(); } };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, handleNextClick, handlePrevClick, saveHistory, updateElement, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool, zoomToFit, brushWidth, setBrushWidth]);
+  }, [selectedIds, selectedConnectionId, removeSelected, removeConnection, editingFocalPointId, setEditingFocalPointId, duplicateSelected, isBrushMode, setBrushMode, clearBrush, undo, redo, selectAll, copySelected, pasteCopied, isPresenting, currentSlideIndex, elements, goToSlide, handleNextClick, handlePrevClick, saveHistory, updateElement, setIsPresenting, isHelpOpen, setIsHelpOpen, brushTool, setBrushTool, zoomToFit, brushWidth, setBrushWidth, commitViewport]);
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       const el = canvasRef.current; if (!el) return;
       const delta = -e.deltaY * 0.001;
-      const newScale = Math.min(Math.max(0.05, scale * (1 + delta)), 20);
-      const rect = el.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
-      const canvasX = (mouseX - pan.x) / scale, canvasY = (mouseY - pan.y) / scale;
-      const newPanX = mouseX - canvasX * newScale, newPanY = mouseY - canvasY * newScale;
-      setScale(newScale); setPan({ x: newPanX, y: newPanY });
+      const current = viewportRef.current;
+      const newScale = Math.min(Math.max(0.05, current.scale * (1 + delta)), 20);
+      const point = rendererRef.current?.clientToScreen({ x: e.clientX, y: e.clientY }); if (!point) return;
+      const mouseX = point.x, mouseY = point.y;
+      applyViewport(CoordinateSystem.zoomAt(current, { x: mouseX, y: mouseY }, newScale));
     };
     const el = canvasRef.current; if (el) el.addEventListener('wheel', handleWheel, { passive: false });
     return () => { if (el) el.removeEventListener('wheel', handleWheel); }
-  }, [scale, pan, setScale, setPan]);
+  }, [applyViewport]);
 
   const handleCanvasPointerDown = (e: React.PointerEvent) => {
+    rendererRef.current?.refreshOrigin();
     if (e.altKey && e.button === 2) {
       isResizingBrushRef.current = true;
       startResizeInfoRef.current = { x: e.clientX, width: brushWidth };
       return;
     }
+    if (e.button !== 0 && e.button !== 1) return;
     if (contextMenu) setContextMenu(null);
     const rect = canvasRef.current!.getBoundingClientRect();
-    const x = (e.clientX - rect.left - pan.x) / scale, y = (e.clientY - rect.top - pan.y) / scale;
+    const { x, y } = CoordinateSystem.screenToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }, viewportRef.current);
 
-    if (isSpaceDown) {
+    if (!isSpaceDown && !isBrushMode && !isPresenting) {
+      const guide = guides.find(g => Math.abs((g.type === 'vertical' ? x : y) - g.position) * viewportRef.current.scale < 5);
+      if (guide) { setDraggedGuide({ id: guide.id, type: guide.type, isNew: false }); return; }
+    }
+    if (isSpaceDown || e.button === 1) {
       setIsPanning(true);
-      startPanInfo.current = { startX: e.clientX, startY: e.clientY, initialPanX: pan.x, initialPanY: pan.y };
+      startPanInfo.current = { startX: e.clientX, startY: e.clientY, initialPanX: viewportRef.current.pan.x, initialPanY: viewportRef.current.pan.y };
       return;
     }
     if (isBrushMode) {
@@ -361,6 +356,7 @@ export const Canvas: React.FC = () => {
       }
       return;
     }
+    if (isPresenting) return;
     if (!e.shiftKey) { selectElement(null); selectConnection(null); }
     setSelectionBox({ x1: x, y1: y, x2: x, y2: y });
   };
@@ -402,8 +398,7 @@ export const Canvas: React.FC = () => {
     e.preventDefault();
     if (e.altKey) return;
     const menuWidth = 190;
-    const target = e.target as HTMLElement;
-    const isElementClick = !!target.closest('.element-wrapper') || selectedIds.length > 0;
+    const isElementClick = selectedIds.length > 0;
     const menuHeight = isElementClick ? 330 : 250;
     
     let x = e.clientX;
@@ -427,7 +422,7 @@ export const Canvas: React.FC = () => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const clickX = contextMenu.originalX;
     const clickY = contextMenu.originalY;
-    const x = (clickX - rect.left - pan.x) / scale, y = (clickY - rect.top - pan.y) / scale;
+    const { x, y } = CoordinateSystem.screenToWorld({ x: clickX - rect.left, y: clickY - rect.top }, viewportRef.current);
     addElement(type, { x: x - 50, y: y - 25 }); setContextMenu(null);
   };
 
@@ -443,19 +438,20 @@ export const Canvas: React.FC = () => {
       brushCursorRef.current.style.left = `${e.clientX}px`;
       brushCursorRef.current.style.top = `${e.clientY}px`;
     }
-    const rect = canvasRef.current!.getBoundingClientRect();
+    if (!draggedGuide && !isErasing && !currentStroke && !isPanning && !selectionBox && !connectingNode) return;
+    const screen = rendererRef.current?.clientToScreen({ x: e.clientX, y: e.clientY }); if (!screen) return;
     if (draggedGuide) {
       if (draggedGuide.type === 'horizontal') {
-        const canvasY = (e.clientY - rect.top - pan.y) / scale;
+        const canvasY = CoordinateSystem.screenToWorld(screen, viewportRef.current).y;
         updateGuide(draggedGuide.id, canvasY);
       } else {
-        const canvasX = (e.clientX - rect.left - pan.x) / scale;
+        const canvasX = CoordinateSystem.screenToWorld(screen, viewportRef.current).x;
         updateGuide(draggedGuide.id, canvasX);
       }
       return;
     }
 
-    const x = (e.clientX - rect.left - pan.x) / scale, y = (e.clientY - rect.top - pan.y) / scale;
+    const { x, y } = CoordinateSystem.screenToWorld(screen, viewportRef.current);
     if (isErasing) {
       const currentPos = { x, y };
       eraseBrushStrokesAt(currentPos, lastEraserPos.current, brushWidth / 2);
@@ -464,15 +460,15 @@ export const Canvas: React.FC = () => {
     }
     if (currentStroke) { setCurrentStroke(prev => prev ? [...prev, { x, y }] : null); return; }
     if (isPanning) {
-      setPan({
+      applyViewport({ scale: viewportRef.current.scale, pan: {
         x: startPanInfo.current.initialPanX + (e.clientX - startPanInfo.current.startX),
         y: startPanInfo.current.initialPanY + (e.clientY - startPanInfo.current.startY)
-      });
+      } });
       return;
     }
     if (selectionBox) { setSelectionBox(prev => prev ? { ...prev, x2: x, y2: y } : null); return; }
     if (connectingNode) { setMousePos({ x, y }); }
-  }, [connectingNode, scale, pan, isPanning, setPan, currentStroke, selectionBox, draggedGuide, updateGuide, isErasing, brushWidth, setBrushWidth, eraseBrushStrokesAt]);
+  }, [connectingNode, isPanning, applyViewport, currentStroke, selectionBox, draggedGuide, updateGuide, isErasing, brushWidth, setBrushWidth, eraseBrushStrokesAt]);
 
   const handlePointerUp = useCallback((e: PointerEvent) => {
     if (isResizingBrushRef.current) {
@@ -499,15 +495,16 @@ export const Canvas: React.FC = () => {
       return;
     }
     if (currentStroke) { addBrushStroke({ id: uuidv4(), points: currentStroke, color: brushColor, width: brushWidth }); setCurrentStroke(null); }
-    if (isPanning) setIsPanning(false);
+    if (isPanning) { setIsPanning(false); commitViewport(); }
     if (connectingNode) setConnectingNode(null);
     if (selectionBox) {
       const xMin = Math.min(selectionBox.x1, selectionBox.x2), xMax = Math.max(selectionBox.x1, selectionBox.x2);
       const yMin = Math.min(selectionBox.y1, selectionBox.y2), yMax = Math.max(selectionBox.y1, selectionBox.y2);
-      elements.filter(el => !el.parentId).forEach(el => { if (el.x >= xMin && el.x + el.width <= xMax && el.y >= yMin && el.y + el.height <= yMax) selectElement(el.id, true); });
+      const geometry = new GraphGeometry(elements);
+      elements.filter(el => !el.parentId).forEach(el => { const b = geometry.layout(el.id)!.bounds; if (b.x >= xMin && b.x + b.width <= xMax && b.y >= yMin && b.y + b.height <= yMax) selectElement(el.id, true); });
       setSelectionBox(null);
     }
-  }, [currentStroke, isPanning, connectingNode, selectionBox, elements, selectElement, addBrushStroke, brushColor, brushWidth, setConnectingNode, draggedGuide, removeGuide, isErasing]);
+  }, [currentStroke, isPanning, connectingNode, selectionBox, elements, selectElement, addBrushStroke, brushColor, brushWidth, setConnectingNode, draggedGuide, removeGuide, isErasing, commitViewport]);
 
   useEffect(() => {
     window.addEventListener('pointermove', handlePointerMove); window.addEventListener('pointerup', handlePointerUp);
@@ -525,8 +522,8 @@ export const Canvas: React.FC = () => {
       const r = canvasRef.current.getBoundingClientRect();
       setContainerSize({ width: r.width, height: r.height });
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const observer = new ResizeObserver(handleResize); observer.observe(canvasRef.current);
+    return () => observer.disconnect();
   }, []);
 
   const getRulerTicks = (size: number, panOffset: number, scale: number) => {
@@ -555,104 +552,16 @@ export const Canvas: React.FC = () => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const id = uuidv4();
     if (type === 'horizontal') {
-      const canvasY = (e.clientY - rect.top - pan.y) / scale;
+      const canvasY = CoordinateSystem.screenToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }, viewportRef.current).y;
       addGuide('horizontal', canvasY, id);
       setDraggedGuide({ id, type: 'horizontal', isNew: true });
     } else {
-      const canvasX = (e.clientX - rect.left - pan.x) / scale;
+      const canvasX = CoordinateSystem.screenToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }, viewportRef.current).x;
       addGuide('vertical', canvasX, id);
       setDraggedGuide({ id, type: 'vertical', isNew: true });
     }
   };
 
-  const handleGuidePointerDown = (e: React.PointerEvent, id: string, type: 'horizontal' | 'vertical') => {
-    e.stopPropagation();
-    setDraggedGuide({ id, type, isNew: false });
-  };
-
-  const getAbsoluteBounds = (id: string) => {
-    const el = elements.find(e => e.id === id); if (!el) return null;
-    let { x, y } = el;
-    const { width, height } = el;
-    if (el.parentId) { const parent = elements.find(e => e.id === el?.parentId); if (parent) { x += parent.x + 16; y += parent.y + 45 + 16; } }
-    return { x, y, width, height, rotation: el.rotation || 0 };
-  };
-
-  const rotateVector = (x: number, y: number, degrees: number) => {
-    const rad = degrees * Math.PI / 180;
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
-    return {
-      x: x * cos - y * sin,
-      y: x * sin + y * cos,
-    };
-  };
-
-  const getPathData = (
-    startX: number,
-    startY: number,
-    startPort: string,
-    endX: number,
-    endY: number,
-    endPort: string,
-    startNormal?: { x: number; y: number },
-    endNormal?: { x: number; y: number }
-  ) => {
-    const dx = endX - startX;
-    const dy = endY - startY;
-    const dist = Math.hypot(dx, dy);
-    const controlDist = Math.min(Math.max(dist * 0.35, 30), 120);
-    let cx1 = startX, cy1 = startY, cx2 = endX, cy2 = endY;
-    if (startNormal) {
-      cx1 += startNormal.x * controlDist;
-      cy1 += startNormal.y * controlDist;
-    } else if (startPort === 'top') cy1 -= controlDist; else if (startPort === 'bottom') cy1 += controlDist; else if (startPort === 'left') cx1 -= controlDist; else cx1 += controlDist;
-    if (endNormal) {
-      cx2 += endNormal.x * controlDist;
-      cy2 += endNormal.y * controlDist;
-    } else if (endPort === 'top') cy2 -= controlDist; else if (endPort === 'bottom') cy2 += controlDist; else if (endPort === 'left') cx2 -= controlDist; else cx2 += controlDist;
-    return `M ${startX} ${startY} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${endX} ${endY}`;
-  };
-
-  const getPortCoords = (bounds: any, port: string) => {
-    const rotation = bounds.rotation || 0;
-    const centerX = bounds.x + bounds.width / 2;
-    const centerY = bounds.y + bounds.height / 2;
-    let localX = 0;
-    let localY = 0;
-    let normalX: number;
-    let normalY: number;
-
-    if (port === 'top') {
-      localY = -bounds.height / 2;
-      normalX = 0;
-      normalY = -1;
-    } else if (port === 'bottom') {
-      localY = bounds.height / 2;
-      normalX = 0;
-      normalY = 1;
-    } else if (port === 'left') {
-      localX = -bounds.width / 2;
-      normalX = -1;
-      normalY = 0;
-    } else {
-      localX = bounds.width / 2;
-      normalX = 1;
-      normalY = 0;
-    }
-
-    const point = rotateVector(localX, localY, rotation);
-    const normal = rotateVector(normalX, normalY, rotation);
-    return { x: centerX + point.x, y: centerY + point.y, nx: normal.x, ny: normal.y };
-  };
-
-  const baseGridSize = 24;
-  let currentGridSize = baseGridSize * scale;
-  while (currentGridSize < 15) currentGridSize *= 2;
-  while (currentGridSize > 60) currentGridSize /= 2;
-
-  const elementById = useMemo(() => new Map(elements.map(el => [el.id, el])), [elements]);
-  const rootElements = useMemo(() => elements.filter(el => !el.parentId), [elements]);
   const presentationSlides = useMemo(() => elements
     .filter(el => el.type === 'node' && (el as any).isSlide !== false)
     .sort((a, b) => a.x - b.x), [elements]);
@@ -719,7 +628,6 @@ export const Canvas: React.FC = () => {
 
   return (
     <div className={`canvas-container ${(isPresenting && isLaserActive) ? 'laser-cursor-none' : ''} ${(isBrushMode && !isSpaceDown) ? 'brush-cursor-none' : ''}`} onContextMenu={handleContextMenu}>
-      <style>{ALL_EFFECTS.map(e => e.css).join('\n')}</style>
       {/* Rulers */}
       {!isPresenting && (
         <>
@@ -733,270 +641,20 @@ export const Canvas: React.FC = () => {
         className={`canvas ${isSpaceDown ? 'space-down' : ''} ${isPanning ? 'panning' : ''} ${(isBrushMode && !isSpaceDown) ? (brushTool === 'erase' ? 'eraser-cursor' : 'brush-cursor') : ''}`}
         ref={canvasRef}
         onPointerDown={handleCanvasPointerDown}
-        style={{ backgroundPosition: `${pan.x}px ${pan.y}px`, backgroundSize: `${currentGridSize}px ${currentGridSize}px` }}
+        style={{ backgroundImage: 'none' }}
       >
-        <div 
-          className="canvas-content" 
-          style={{ 
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, 
-            transformOrigin: '0 0', 
-            width: '100%', 
-            height: '100%', 
-            position: 'absolute',
-            transition: isPresenting ? 'transform 0.6s cubic-bezier(0.25, 1, 0.5, 1)' : 'none'
+        <PixiWorkspace
+          rendererRef={rendererRef}
+          panMode={isSpaceDown}
+          onSnap={setSnapGuides}
+          overlay={{
+            selection: selectionBox,
+            stroke: currentStroke ? { points: currentStroke, color: brushColor, width: brushWidth } : null,
+            connecting: connectingNode ? { ...connectingNode, point: mousePos } : null,
+            guides,
+            snap: snapGuides,
           }}
-        >
-          
-          <svg className="connections-layer" style={{ overflow: 'visible', zIndex: 1, position: 'absolute', pointerEvents: 'none' }}>
-            <defs>
-            </defs>
-            {connections.map(conn => {
-              const f = elements.find(el => el.id === conn.fromId);
-              const t = elements.find(el => el.id === conn.toId);
-              if (!f || !t) return null;
-
-              const fb = getAbsoluteBounds(conn.fromId), tb = getAbsoluteBounds(conn.toId); 
-              if (!fb || !tb) return null;
-              
-              const startPort = getPortCoords(fb, conn.fromPort);
-              const endPort = getPortCoords(tb, conn.toPort);
-              let { x: sx, y: sy } = startPort;
-              let { x: ex, y: ey } = endPort;
-
-              const stroke = getConnectionStroke(conn);
-              const arrow = getConnectionArrow(conn);
-              const lineColor = selectedConnectionId === conn.id ? '#4caf50' : stroke.color;
-              const markerBaseId = `editor-marker-${conn.id}`;
-              const markerStart = arrow.start !== 'none' ? `url(#${markerBaseId}-start)` : "none";
-              const markerEnd = arrow.end !== 'none' ? `url(#${markerBaseId}-end)` : "none";
-
-              // Shorten path if there are arrowheads to create an aesthetic gap
-              const gap = Math.max(1.8, arrow.size * 0.3);
-              if (arrow.start !== 'none') {
-                sx += startPort.nx * gap;
-                sy += startPort.ny * gap;
-              }
-              if (arrow.end !== 'none') {
-                ex += endPort.nx * gap;
-                ey += endPort.ny * gap;
-              }
-
-              const dx = ex - sx;
-              const dy = ey - sy;
-              const dist = Math.hypot(dx, dy);
-              const controlDist = Math.min(Math.max(dist * 0.35, 30), 120);
-              let cx1 = sx, cy1 = sy, cx2 = ex, cy2 = ey;
-              cx1 += startPort.nx * controlDist;
-              cy1 += startPort.ny * controlDist;
-              cx2 += endPort.nx * controlDist;
-              cy2 += endPort.ny * controlDist;
-
-              const midX = 0.125 * sx + 0.375 * cx1 + 0.375 * cx2 + 0.125 * ex;
-              const midY = 0.125 * sy + 0.375 * cy1 + 0.375 * cy2 + 0.125 * ey;
-              const pathData = stroke.lineType === 'straight'
-                ? `M ${sx} ${sy} L ${ex} ${ey}`
-                : stroke.lineType === 'elbow'
-                  ? `M ${sx} ${sy} L ${sx} ${midY} L ${ex} ${midY} L ${ex} ${ey}`
-                  : `M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${ex} ${ey}`;
-              const markerPath = (type: string, id: string, orient: string) => {
-                if (type === 'circle') {
-                  return (
-                    <marker id={id} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={arrow.size} markerHeight={arrow.size} orient={orient}>
-                      <circle cx="5" cy="5" r="3.2" fill={lineColor} />
-                    </marker>
-                  );
-                }
-                if (type === 'diamond') {
-                  return (
-                    <marker id={id} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={arrow.size} markerHeight={arrow.size} orient={orient}>
-                      <path d="M 5 0.8 L 9.2 5 L 5 9.2 L 0.8 5 Z" fill={lineColor} />
-                    </marker>
-                  );
-                }
-                return (
-                  <marker id={id} viewBox="0 0 10 10" refX="7" refY="5" markerWidth={arrow.size} markerHeight={arrow.size} orient={orient}>
-                    <path d={type === 'triangle' ? 'M 1 1 L 9 5 L 1 9 Z' : 'M 0 1.5 L 10 5 L 0 8.5 Z'} fill={lineColor} />
-                  </marker>
-                );
-              };
-
-              const isConnHidden = !f.visible || !t.visible;
-              return (
-                <g 
-                  key={conn.id} 
-                  className={`connection-group ${selectedConnectionId === conn.id ? 'selected' : ''}`} 
-                  style={{ 
-                    opacity: isConnHidden ? (isPresenting ? 0 : 0.4) : 1, 
-                    pointerEvents: (isConnHidden || isBrushMode) ? 'none' : 'auto',
-                    transition: 'opacity 0.4s ease'
-                  }}
-                  onPointerDown={(e) => { e.stopPropagation(); selectConnection(conn.id); }}
-                  onDoubleClick={(e) => { e.stopPropagation(); removeConnection(conn.id); }}
-                >
-                  <defs>
-                    {arrow.start !== 'none' && markerPath(arrow.start, `${markerBaseId}-start`, 'auto-start-reverse')}
-                    {arrow.end !== 'none' && markerPath(arrow.end, `${markerBaseId}-end`, 'auto')}
-                  </defs>
-                  <path
-                    id={`editor-conn-${conn.id}`}
-                    d={pathData}
-                    className="connection-path"
-                    markerStart={markerStart}
-                    markerEnd={markerEnd}
-                    stroke={lineColor}
-                    strokeWidth={stroke.width}
-                    strokeDasharray={getConnectionDasharray(stroke.style, stroke.width)}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ stroke: lineColor, strokeWidth: stroke.width }}
-                  />
-                  <path id={`editor-conn-pulse-${conn.id}`} d={pathData} className="flow-pulse-path" fill="none" stroke={lineColor} strokeWidth={Math.max(2, stroke.width)} strokeLinecap="round" opacity="0.8" />
-                  <path d={pathData} stroke="transparent" strokeWidth="20" fill="none" />
-                  
-                  {conn.label && (
-                    conn.labelAlignment === 'follow' ? (
-                      <>
-                        {conn.reverseLabelDirection && (
-                          <path 
-                            id={`editor-conn-text-${conn.id}`} 
-                            d={`M ${ex} ${ey} C ${cx2} ${cy2}, ${cx1} ${cy1}, ${sx} ${sy}`} 
-                            fill="none" 
-                            stroke="none" 
-                            pointerEvents="none" 
-                          />
-                        )}
-                        <text fill={conn.color || "var(--text-primary)"} fontSize={conn.fontSize || "14"} fontFamily={conn.fontFamily} dy="-5" pointerEvents="none" fontWeight="bold">
-                          <textPath href={conn.reverseLabelDirection ? `#editor-conn-text-${conn.id}` : `#editor-conn-${conn.id}`} startOffset="50%" textAnchor="middle">{conn.label}</textPath>
-                        </text>
-                      </>
-                    ) : (
-                      <foreignObject 
-                        x={midX - 200} 
-                        y={midY - 20} 
-                        width={400} 
-                        height={40} 
-                        pointerEvents="none"
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: '100%', pointerEvents: 'none' }}>
-                          <span 
-                            style={{ 
-                              background: 'var(--bg-canvas)', 
-                              padding: '3px 10px', 
-                              borderRadius: '100px', 
-                              fontSize: `${conn.fontSize || 12}px`, 
-                              color: conn.color || 'var(--text-primary)', 
-                              fontWeight: 'bold', 
-                              whiteSpace: 'nowrap',
-                              border: '1px solid var(--border-color)',
-                              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                              fontFamily: conn.fontFamily || 'inherit'
-                            }}
-                          >
-                            {conn.label}
-                          </span>
-                        </div>
-                      </foreignObject>
-                    )
-                  )}
-                </g>
-              );
-            })}
-            {connectingNode && (() => {
-              const bounds = getAbsoluteBounds(connectingNode.id);
-              if (!bounds) return null;
-              const port = getPortCoords(bounds, connectingNode.port);
-              return (
-                <path
-                  d={getPathData(port.x, port.y, connectingNode.port, mousePos.x, mousePos.y, 'left', { x: port.nx, y: port.ny })}
-                  fill="none"
-                  stroke="#4caf50"
-                  strokeWidth="2"
-                  strokeDasharray="5,5"
-                />
-              );
-            })()}
-          </svg>
-
-          {rootElements.map(el => (
-            <ElementWrapper key={el.id} element={el} />
-          ))}
-
-          {/* Custom user guidelines */}
-          {guides.map(guide => {
-            if (guide.type === 'horizontal') {
-              return (
-                <div 
-                  key={guide.id}
-                  onPointerDown={(e) => handleGuidePointerDown(e, guide.id, 'horizontal')}
-                  style={{ 
-                    position: 'absolute', 
-                    top: guide.position, 
-                    left: -10000, 
-                    right: -10000, 
-                    height: '6px', 
-                    marginTop: '-3px',
-                    borderTop: '1.5px dashed #ff5252', 
-                    cursor: 'row-resize', 
-                    zIndex: 1998, 
-                    pointerEvents: isBrushMode ? 'none' : 'auto' 
-                  }} 
-                />
-              );
-            } else {
-              return (
-                <div 
-                  key={guide.id}
-                  onPointerDown={(e) => handleGuidePointerDown(e, guide.id, 'vertical')}
-                  style={{ 
-                    position: 'absolute', 
-                    left: guide.position, 
-                    top: -10000, 
-                    bottom: -10000, 
-                    width: '6px', 
-                    marginLeft: '-3px',
-                    borderLeft: '1.5px dashed #ff5252', 
-                    cursor: 'col-resize', 
-                    zIndex: 1998, 
-                    pointerEvents: isBrushMode ? 'none' : 'auto' 
-                  }} 
-                />
-              );
-            }
-          })}
-
-          {/* Dynamic snapping guidelines */}
-          {isSnapEnabled && snapGuides.x !== null && (
-            <div style={{ position: 'absolute', left: snapGuides.x, top: -10000, bottom: -10000, width: '1px', borderLeft: '1px dashed #4caf50', zIndex: 1999, pointerEvents: 'none' }} />
-          )}
-          {isSnapEnabled && snapGuides.y !== null && (
-            <div style={{ position: 'absolute', top: snapGuides.y, left: -10000, right: -10000, height: '1px', borderTop: '1px dashed #4caf50', zIndex: 1999, pointerEvents: 'none' }} />
-          )}
-
-          <svg className="brush-layer" style={{ overflow: 'visible', position: 'absolute', zIndex: 1000, pointerEvents: 'none' }}>
-            {brushStrokes.map(s => {
-              const attachedNode = s.attachedNodeId ? elementById.get(s.attachedNodeId) : null;
-              const isHidden = attachedNode ? !attachedNode.visible : false;
-              return (
-                <path
-                  key={s.id}
-                  d={s.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
-                  fill="none"
-                  stroke={s.color}
-                  strokeWidth={s.width}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  opacity={isHidden ? (isPresenting ? 0 : 0.2) : 1}
-                  style={{ transition: 'opacity 0.4s ease' }}
-                />
-              );
-            })}
-            {currentStroke && <path d={currentStroke.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} fill="none" stroke={brushColor} strokeWidth={brushWidth} strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />}
-          </svg>
-
-          {selectionBox && (
-            <div style={{ position: 'absolute', left: Math.min(selectionBox.x1, selectionBox.x2), top: Math.min(selectionBox.y1, selectionBox.y2), width: Math.abs(selectionBox.x2 - selectionBox.x1), height: Math.abs(selectionBox.y2 - selectionBox.y1), backgroundColor: 'rgba(76, 175, 80, 0.1)', border: '1px solid #4caf50', pointerEvents: 'none', zIndex: 2000 }} />
-          )}
-        </div>
+        />
       </div>
 
       {!isPresenting && (

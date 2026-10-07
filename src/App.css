@@ -15,9 +15,6 @@ body {
   --panel-header-bg: #1a1b26;
 }
 
-.pointer-events-none, .pointer-events-none * {
-  pointer-events: none !important;
-}
 
 body.light-theme {
   --bg-canvas: #f8f9fa;
@@ -106,7 +103,6 @@ body.light-theme {
   width: 100%;
   height: 100%;
   background-color: var(--bg-canvas);
-  background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
   position: relative;
   overflow: hidden;
   transition: background-color 0.3s;
@@ -115,43 +111,13 @@ body.light-theme {
 .canvas.space-down {
   cursor: grab;
 }
-.canvas.space-down .canvas-content {
-  pointer-events: none;
-}
 .canvas.panning {
   cursor: grabbing;
 }
 
-.canvas-content {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  transform-origin: 0 0;
-}
 
-.connections-layer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 10;
-}
 
-.connection-path {
-  fill: none;
-  stroke: #6c6d80;
-  stroke-width: 2;
-  transition: stroke 0.2s;
-}
 
-.connection-path:hover {
-  stroke: #4caf50;
-  stroke-width: 3;
-}
 
 /* Properties Panel - Premium Glassmorphism */
 .properties-panel {
@@ -238,12 +204,6 @@ body.light-theme {
   font-size: 11px;
 }
 
-/* Canvas Element Wrappers (Nodes) */
-.element-wrapper {
-  position: absolute;
-  user-select: none;
-  display: block; /* Default to block to avoid flexbox shrinking */
-}
 
 .slide-navigator {
   position: absolute;
@@ -525,126 +485,18 @@ body.light-theme {
   color: #ef5350;
 }
 
-.element-wrapper.is-node {
-  display: flex;
-  flex-direction: column;
-  background-color: var(--bg-toolbar);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-}
 
-.element-wrapper.is-node.selected {
-  border-color: #4caf50;
-  box-shadow: 0 0 0 1px #4caf50, 0 8px 24px rgba(0,0,0,0.5);
-}
 
-.element-wrapper:not(.is-node).selected {
-  outline: 2px dashed #4caf50;
-  outline-offset: 2px;
-}
 
-.element-header {
-  padding: 12px 16px;
-  background-color: var(--panel-header-bg);
-  border-bottom: 1px solid var(--border-color);
-  border-top-left-radius: 9px;
-  border-top-right-radius: 9px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  cursor: grab;
-  flex-shrink: 0;
-}
 
-.element-header:active {
-  cursor: grabbing;
-}
 
-.element-content {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  position: relative;
-  cursor: grab;
-}
 
-.element-wrapper.is-node > .element-content {
-  flex: 1; /* Only nodes need flex-1 for content area */
-  padding: 16px;
-  display: block;
-  overflow: hidden;
-}
 
-.focal-point-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0,0,0,0.4);
-  z-index: 100;
-  cursor: crosshair;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid #4caf50;
-  border-radius: inherit;
-}
 
-.focal-point-indicator {
-  position: absolute;
-  width: 24px;
-  height: 24px;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  background: rgba(76, 175, 80, 0.6);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  box-shadow: 0 0 10px rgba(0,0,0,0.5);
-}
 
-.focal-point-indicator::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 4px;
-  height: 4px;
-  background: #fff;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-}
 
-.media-settings-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 20;
-  color: var(--text-secondary);
-  transition: all 0.2s;
-}
 
-.element-wrapper:has(.media-header) .media-settings-btn {
-  top: 40px;
-}
 
-.media-settings-btn:hover {
-  background: #4caf50;
-  color: #fff;
-}
 
 /* Context Menu */
 .context-menu {
@@ -681,178 +533,30 @@ body.light-theme {
   margin: 8px 0;
 }
 
-.focal-point-hint {
-  position: fixed;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(76, 175, 80, 0.9);
-  color: #fff;
-  padding: 8px 20px;
-  border-radius: 30px;
-  font-size: 13px;
-  font-weight: 600;
-  z-index: 10001;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-  pointer-events: none;
-  animation: bounce 2s infinite;
-}
 
-@keyframes bounce {
-  0%, 20%, 50%, 80%, 100% {transform: translateX(-50%) translateY(0);}
-  40% {transform: translateX(-50%) translateY(-10px);}
-  60% {transform: translateX(-50%) translateY(-5px);}
-}
 
-.element-wrapper.disabled {
-  filter: grayscale(1) contrast(0.5);
-  opacity: 0.6;
-  pointer-events: auto; /* Always allow selection in editor */
-}
 
-.element-wrapper.is-hidden {
-  opacity: 0.2; /* Visible enough to select in editor */
-  pointer-events: auto;
-}
 
-.is-presenting .element-wrapper.is-hidden {
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
 
-.element-wrapper.is-hidden.selected {
-  opacity: 0.4;
-  outline: 2px dashed #ff9800;
-}
 
-.element-wrapper.is-node.disabled {
-  border-style: dotted;
-}
 
 .brush-cursor {
   cursor: crosshair !important;
 }
 
-.brush-layer {
-  pointer-events: none;
-  z-index: 1000; /* On top of elements */
-}
 
-.media-header {
-  padding: 6px 12px;
-  background-color: var(--panel-header-bg);
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  width: 100%;
-  z-index: 5;
-  pointer-events: none;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  flex-shrink: 0;
-}
 
-.element-content:active {
-  cursor: grabbing;
-}
 
-/* Node Handles (Ports) */
-.node-handle {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  background-color: var(--text-secondary);
-  border: 2px solid var(--bg-toolbar);
-  border-radius: 50%;
-  cursor: crosshair;
-  z-index: 30;
-  opacity: 0;
-  transition: opacity 0.2s, transform 0.2s, background-color 0.2s;
-}
 
-.element-wrapper.selected .node-handle,
-.element-wrapper.connecting .node-handle {
-  opacity: 1;
-}
 
-.node-handle:hover {
-  background-color: #4caf50;
-  transform: scale(1.2);
-}
 
-.node-handle.top {
-  top: -7px;
-  left: 50%;
-  transform: translateX(-50%);
-}
 
-.node-handle.right {
-  right: -7px;
-  top: 50%;
-  transform: translateY(-50%);
-}
 
-.node-handle.bottom {
-  bottom: -7px;
-  left: 50%;
-  transform: translateX(-50%);
-}
 
-.node-handle.left {
-  left: -7px;
-  top: 50%;
-  transform: translateY(-50%);
-}
 
-.node-handle.top:hover { transform: translateX(-50%) scale(1.2); }
-.node-handle.right:hover { transform: translateY(-50%) scale(1.2); }
-.node-handle.bottom:hover { transform: translateX(-50%) scale(1.2); }
-.node-handle.left:hover { transform: translateY(-50%) scale(1.2); }
 
-/* Resize Handles */
-.resize-handle {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  background-color: #ffffff;
-  border: 2px solid #4caf50;
-  border-radius: 50%;
-  z-index: 30;
-}
 
-.resize-handle.nw { top: -5px; left: -5px; cursor: nwse-resize; }
-.resize-handle.ne { top: -5px; right: -5px; cursor: nesw-resize; }
-.resize-handle.sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
-.resize-handle.se { bottom: -5px; right: -5px; cursor: nwse-resize; }
 
-/* Rotate Handle */
-.rotate-handle {
-  position: absolute;
-  top: -30px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 12px;
-  height: 12px;
-  background-color: #4caf50;
-  border-radius: 50%;
-  cursor: grab;
-  z-index: 35;
-}
-.rotate-handle:active {
-  cursor: grabbing;
-}
-.rotate-handle::after {
-  content: '';
-  position: absolute;
-  top: 12px;
-  left: 5px;
-  width: 2px;
-  height: 18px;
-  background-color: #4caf50;
-}
 
 
 
@@ -967,24 +671,8 @@ body.light-theme {
   transform: scale(1.05);
 }
 
-.connection-path {
-  fill: none;
-  stroke: #6c6d80;
-  stroke-width: 2;
-  transition: stroke 0.2s, stroke-width 0.2s;
-  pointer-events: auto;
-  cursor: pointer;
-}
 
-.connection-path:hover {
-  stroke: #4caf50;
-  stroke-width: 3;
-}
 
-.connection-group.selected .connection-path {
-  stroke: #4caf50;
-  stroke-width: 3;
-}
 
 /* Shape Popover styling */
 .shape-popover {

@@ -5,7 +5,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BrushStroke } from '../types';
 import { GeometryService } from '../services/GeometryService';
-import { getDistanceToSegment } from '../services/dom-utils';
+import { BrushGeometry } from '../workspace/BrushGeometry';
 import { BuilderDeps } from './BuilderDeps';
 
 export class BrushManager {
@@ -42,47 +42,6 @@ export class BrushManager {
     lastPos: { x: number; y: number } | null,
     radius: number
   ): void => {
-    this.d.setBrushStrokes(prevStrokes => {
-      let changed = false;
-      const newStrokes: BrushStroke[] = [];
-      for (const stroke of prevStrokes) {
-        let currentPoints: { x: number; y: number }[] = [];
-        for (const p of stroke.points) {
-          const dist = lastPos
-            ? getDistanceToSegment(p, lastPos, currentPos)
-            : Math.hypot(p.x - currentPos.x, p.y - currentPos.y);
-
-          const threshold = radius + stroke.width / 2;
-          if (dist <= threshold) {
-            if (currentPoints.length > 1) {
-              newStrokes.push({
-                id: uuidv4(),
-                points: currentPoints,
-                color: stroke.color,
-                width: stroke.width,
-                attachedNodeId: stroke.attachedNodeId
-              });
-            }
-            currentPoints = [];
-            changed = true;
-          } else {
-            currentPoints.push(p);
-          }
-        }
-        if (currentPoints.length > 1) {
-          newStrokes.push({
-            id: stroke.id,
-            points: currentPoints,
-            color: stroke.color,
-            width: stroke.width,
-            attachedNodeId: stroke.attachedNodeId
-          });
-        }
-      }
-      if (changed) {
-        return newStrokes;
-      }
-      return prevStrokes;
-    });
+    this.d.setBrushStrokes(strokes => BrushGeometry.erase(strokes, currentPos, lastPos, radius, uuidv4));
   };
 }

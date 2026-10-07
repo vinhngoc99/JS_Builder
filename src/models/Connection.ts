@@ -27,9 +27,3 @@ export const getConnectionArrow = (conn: Connection): ConnectionArrowStyle => ({
   end: conn.arrow?.end || conn.endArrow || 'none',
   size: conn.arrow?.size ?? DEFAULT_CONNECTION_ARROW.size,
 });
-
-export const getConnectionDasharray = (style: ConnectionStrokeStyle['style'], width: number): string | undefined => {
-  if (style === 'dashed') return `${width * 4} ${width * 2}`;
-  if (style === 'dotted') return `${width} ${width * 2}`;
-  return undefined;
-};

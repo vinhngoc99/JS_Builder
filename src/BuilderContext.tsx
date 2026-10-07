@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useCa
 import { CanvasElement, ElementType, Connection, PortPosition, BrushStroke, Variant } from './types';
 import { migrateConnections, migrateElements, migrateVariants } from './models/migration';
 import { storage } from './services/StorageService';
-import { GeometryService } from './services/GeometryService';
+import { BrushGeometry } from './workspace/BrushGeometry';
 import { generateExportHTML } from './services/HtmlExportService';
 import { BuilderDeps } from './managers/BuilderDeps';
 import { HistoryManager } from './managers/HistoryManager';
@@ -13,24 +13,6 @@ import { BrushManager } from './managers/BrushManager';
 import { LayerManager } from './managers/LayerManager';
 import { VariantManager } from './managers/VariantManager';
 import { GuideManager } from './managers/GuideManager';
-
-// Re-export element accessors so existing import paths keep working
-// (e.g. `import { getAdaptedTextColor } from '../BuilderContext'`).
-export {
-  getAdaptedTextColor,
-  getAdaptedBorderColor,
-  getAdaptedBgColor,
-  getElementFillColor,
-  getElementStroke,
-  getElementText,
-  getElementTextColor,
-  getElementFontFamily,
-  getElementFontSize,
-  getElementTextAlign,
-  getElementName,
-  getElementShadowCSS,
-  getElementAction,
-} from './services/element-accessors';
 
 interface ConnectingState {
   id: string;
@@ -51,6 +33,8 @@ interface BuilderContextType {
   selectedIds: string[];
   selectedConnectionId: string | null;
   isPropertiesOpen: boolean;
+  loadImageDimensions: (src: string) => Promise<{ width: number; height: number }>;
+  registerImageDimensions: (loader: ((src: string) => Promise<{ width: number; height: number }>) | null) => void;
   setIsPropertiesOpen: (open: boolean) => void;
   connectingNode: ConnectingState | null;
   scale: number;
@@ -146,6 +130,9 @@ interface BuilderContextType {
 const BuilderContext = createContext<BuilderContextType | undefined>(undefined);
 
 export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const imageDimensionsRef = useRef<((src: string) => Promise<{ width: number; height: number }>) | null>(null);
+  const registerImageDimensions = useCallback((loader: typeof imageDimensionsRef.current) => { imageDimensionsRef.current = loader; }, []);
+  const loadImageDimensions = useCallback((src: string) => imageDimensionsRef.current?.(src) ?? Promise.reject(new Error('Workspace not ready')), []);
   const [variants, setVariants] = useState<Variant[]>(() => {
     const parsed = storage.parsedVariants();
     if (parsed) {
@@ -226,11 +213,6 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   connectionsRef.current = connections;
   brushStrokesRef.current = brushStrokes;
 
-  const getElementCanvasBounds = useCallback(
-    (el: CanvasElement, allElements: CanvasElement[] = elementsRef.current) =>
-      GeometryService.getElementCanvasBounds(el, allElements),
-    []
-  );
 
   const historyScopesRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -257,43 +239,15 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => { storage.saveConnections(connections); }, [connections]);
   useEffect(() => { storage.saveBrush(brushStrokes); }, [brushStrokes]);
 
-  const prevElementPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
-
+  const previousGraphRef = useRef({ elements, brushStrokes, activeVariantId });
   useEffect(() => {
-    const currentPositions: Record<string, { x: number; y: number }> = {};
-    
-    let hasChanges = false;
-    const updates: Record<string, { dx: number; dy: number }> = {};
-    
-    elements.forEach(el => {
-      const bounds = getElementCanvasBounds(el, elements);
-      currentPositions[el.id] = { x: bounds.x, y: bounds.y };
-      const prev = prevElementPositionsRef.current[el.id];
-      if (prev) {
-        const dx = bounds.x - prev.x;
-        const dy = bounds.y - prev.y;
-        if (dx !== 0 || dy !== 0) {
-          updates[el.id] = { dx, dy };
-          hasChanges = true;
-        }
-      }
-    });
-    
-    if (hasChanges) {
-      setBrushStrokes(prevStrokes => prevStrokes.map(stroke => {
-        if (stroke.attachedNodeId && updates[stroke.attachedNodeId]) {
-          const { dx, dy } = updates[stroke.attachedNodeId];
-          return {
-            ...stroke,
-            points: stroke.points.map(p => ({ x: p.x + dx, y: p.y + dy }))
-          };
-        }
-        return stroke;
-      }));
-    }
-    
-    prevElementPositionsRef.current = currentPositions;
-  }, [elements, getElementCanvasBounds]);
+    const previous = previousGraphRef.current;
+    previousGraphRef.current = { elements, brushStrokes, activeVariantId };
+    // History and variant restores already carry their own brush coordinates.
+    if (previous.elements === elements || previous.activeVariantId !== activeVariantId || previous.brushStrokes !== brushStrokes) return;
+    const moved = BrushGeometry.translate(brushStrokes, previous.elements, elements);
+    if (moved.some((stroke, i) => stroke !== brushStrokes[i])) setBrushStrokes(moved);
+  }, [elements, brushStrokes, activeVariantId]);
 
   const lastActiveVariantIdRef = useRef(activeVariantId);
 
@@ -425,6 +379,7 @@ export const BuilderProvider: React.FC<{ children: ReactNode }> = ({ children })
   return (
     <BuilderContext.Provider value={{
       elements, connections, selectedIds, selectedConnectionId, connectingNode, scale, pan,
+      loadImageDimensions, registerImageDimensions,
       addElement: element.addElement, addSlideNode: element.addSlideNode, duplicateSlideNode: element.duplicateSlideNode, moveSlideNode: element.moveSlideNode, updateElement: element.updateElement, updateConnection: connection.updateConnection, removeElement: element.removeElement, removeSelected: element.removeSelected, selectElement: selection.selectElement, selectConnection: selection.selectConnection,
       setConnectingNode, addConnection: connection.addConnection, removeConnection: connection.removeConnection, duplicateSelected: element.duplicateSelected,
       setScale, setPan, exportHTML, alignElements: element.alignElements, distributeElements: element.distributeElements, isPresenting, setIsPresenting, editingFocalPointId, setEditingFocalPointId,

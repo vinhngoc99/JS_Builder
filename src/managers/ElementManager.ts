@@ -313,14 +313,17 @@ export class ElementManager {
   };
 
   removeSelected = (): void => {
-    const { saveHistory, selectedIds, elementsRef, setElements, setConnections, setSelectedIds } = this.d;
+    const { saveHistory, selectedIds, elementsRef, setElements, setConnections, setBrushStrokes, setSelectedIds } = this.d;
     saveHistory();
     const toDelete = new Set(selectedIds);
-    elementsRef.current.forEach(el => {
-      if (el.parentId && toDelete.has(el.parentId)) toDelete.add(el.id);
-    });
+    let added = true;
+    while (added) {
+      added = false;
+      elementsRef.current.forEach(el => { if (el.parentId && toDelete.has(el.parentId) && !toDelete.has(el.id)) { toDelete.add(el.id); added = true; } });
+    }
     setElements(prev => prev.filter(el => !toDelete.has(el.id)));
     setConnections(prev => prev.filter(c => !toDelete.has(c.fromId) && !toDelete.has(c.toId)));
+    setBrushStrokes(prev => prev.filter(s => !s.attachedNodeId || !toDelete.has(s.attachedNodeId)));
     setSelectedIds([]);
   };
 

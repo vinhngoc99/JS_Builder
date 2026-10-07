@@ -75,12 +75,6 @@ const getFittedImageSize = (naturalWidth: number, naturalHeight: number) => {
   };
 };
 
-const loadImageDimensions = (src: string): Promise<{ width: number; height: number }> => new Promise((resolve, reject) => {
-  const img = new Image();
-  img.onload = () => resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
-  img.onerror = () => reject(new Error('Could not load image dimensions.'));
-  img.src = src;
-});
 
 const readImageFileOriginal = (file: File): Promise<{ src: string; width: number; height: number }> => new Promise((resolve, reject) => {
   const objectUrl = URL.createObjectURL(file);
@@ -170,7 +164,7 @@ const NumberInput = ({ label, value, onChange, min, max, disabled, style }: any)
 };
 
 export const PropertiesPanel: React.FC = () => {
-  const { elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory, saveHistoryOnce, showAlert } = useBuilder();
+  const { loadImageDimensions, elements, selectedIds, updateElement, removeElement, removeSelected, exportHTML, connections, selectedConnectionId, updateConnection, removeConnection, theme, setTheme, isSnapEnabled, setIsSnapEnabled, isBlurEnabled, setIsBlurEnabled, alignElements, distributeElements, setIsPresenting, isPropertiesOpen, setIsPropertiesOpen, saveHistory, saveHistoryOnce, showAlert } = useBuilder();
 
   const lastSelectedId = selectedIds[selectedIds.length - 1];
   const selectedElement = elements.find(el => el.id === lastSelectedId);
@@ -180,6 +174,9 @@ export const PropertiesPanel: React.FC = () => {
   const [htmlCode, setHtmlCode] = React.useState('');
   const [previewUrl, setPreviewUrl] = React.useState('');
   const imageLoadRequestRef = React.useRef(0);
+  const imageSourceRequests = React.useRef(new Map<string, number>());
+  const liveElements = React.useRef(elements); liveElements.current = elements;
+  React.useEffect(() => () => { imageLoadRequestRef.current++; imageSourceRequests.current.clear(); }, []);
 
   React.useEffect(() => {
     if (!modalOpen || !previewMode || !htmlCode) {
@@ -478,14 +475,11 @@ export const PropertiesPanel: React.FC = () => {
           else if (targetEl.type === 'video') val = `https://drive.google.com/file/d/${driveMatch[1]}/preview`;
         }
         if (targetEl.type === 'image') {
-          const img = new Image();
-          img.onload = () => {
-            updateElement(targetEl.id, {
-              ...getFittedImageSize(img.naturalWidth || img.width, img.naturalHeight || img.height),
-              src: val as string,
-            });
-          };
-          img.src = val as string;
+          const src = val as string, request = (imageSourceRequests.current.get(id) || 0) + 1;
+          imageSourceRequests.current.set(id, request); updateElement(id, { src });
+          void loadImageDimensions(src).then(size => {
+            if (imageSourceRequests.current.get(id) === request && liveElements.current.some(el => el.id === id && el.type === 'image' && el.src === src)) updateElement(id, getFittedImageSize(size.width, size.height));
+          }).catch(() => { /* The Pixi workspace reports the source/CORS error. */ });
           return;
         }
         if (targetEl.type === 'video') {
@@ -532,22 +526,19 @@ export const PropertiesPanel: React.FC = () => {
 
   const updateSelectedImageSource = async (src: string, extraUpdates: Record<string, any> = {}) => {
     const requestId = ++imageLoadRequestRef.current;
+    const ids = [...selectedIds];
     if (!selectedElement || selectedElement.type !== 'image') {
       handlePanelChange({ src, ...extraUpdates });
       return;
     }
 
+    handlePanelChange({ src, ...extraUpdates });
     try {
       const size = await loadImageDimensions(src);
       if (requestId !== imageLoadRequestRef.current) return;
-      handlePanelChange({
-        src,
-        ...getFittedImageSize(size.width, size.height),
-        ...extraUpdates,
-      } as any);
+      ids.forEach(id => { if (liveElements.current.some(el => el.id === id && el.type === 'image' && el.src === src)) updateElement(id, { ...getFittedImageSize(size.width, size.height), ...extraUpdates }); });
     } catch {
-      if (requestId !== imageLoadRequestRef.current) return;
-      handlePanelChange({ src, ...extraUpdates });
+      // Rendering retains the failed URL and exposes its error; never restore a stale source.
     }
   };
 

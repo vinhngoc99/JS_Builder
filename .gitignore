@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+test-results/
+playwright-report/
+scratch/pixi-*
+scratch/baseline.mjs
+scratch/inspect-workspace.mjs

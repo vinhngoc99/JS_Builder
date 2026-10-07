@@ -1,7 +1,7 @@
 // =============================================================================
 // Compatibility Layer — exposes old-style property names from new OOP model
 // =============================================================================
-// This allows the existing rendering code (ElementWrapper, Canvas, exportHTML)
+// This allows the existing property panels and model migration code
 // to continue working while we progressively migrate to the new OOP accessors.
 
 import type { CanvasElement, ButtonElement, ImageElement, IconElement, ShapeElement } from '../types';
